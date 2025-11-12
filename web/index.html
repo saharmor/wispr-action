@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wispr Action - Voice Command Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🎙️ Wispr Action</h1>
+                <p class="subtitle">Voice Command Manager</p>
+            </div>
+            <div class="header-actions">
+                <div class="monitor-status">
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span id="statusText">Checking...</span>
+                </div>
+                <button id="toggleMonitorBtn" class="btn btn-primary">Start Monitor</button>
+                <button id="newCommandBtn" class="btn btn-success">+ New Command</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Command List -->
+            <section class="command-list-section">
+                <div class="section-header">
+                    <h2>Commands</h2>
+                    <span class="command-count" id="commandCount">0 commands</span>
+                </div>
+                
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-icon">📋</div>
+                    <h3>No commands yet</h3>
+                    <p>Create your first voice command to get started</p>
+                    <button class="btn btn-primary" onclick="showCommandEditor()">Create Command</button>
+                </div>
+
+                <div class="command-table-container" id="commandTableContainer" style="display: none;">
+                    <table class="command-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Description</th>
+                                <th>Parameters</th>
+                                <th>Action</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="commandTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Test Panel -->
+            <section class="test-panel">
+                <h3>🧪 Test Command</h3>
+                <div class="test-input-group">
+                    <textarea 
+                        id="testPhrase" 
+                        placeholder="Type a test phrase, e.g., 'command, run email processor for sahar@gmail.com'"
+                        rows="3"
+                    ></textarea>
+                    <button id="testParseBtn" class="btn btn-primary">Parse Command</button>
+                </div>
+                <div class="test-result" id="testResult" style="display: none;">
+                    <div class="result-header">
+                        <strong>Result:</strong>
+                    </div>
+                    <div id="testResultContent"></div>
+                    <button id="testExecuteBtn" class="btn btn-secondary" style="display: none;">Execute</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Command Editor Panel (Slide-in) -->
+    <div class="editor-overlay" id="editorOverlay">
+        <div class="editor-panel" id="editorPanel">
+            <div class="editor-header">
+                <h2 id="editorTitle">New Command</h2>
+                <button class="close-btn" onclick="closeCommandEditor()">&times;</button>
+            </div>
+
+            <div class="editor-content">
+                <!-- Section 1: Basics -->
+                <section class="editor-section">
+                    <h3>📝 Basics</h3>
+                    <div class="form-group">
+                        <label for="cmdName">Command Name *</label>
+                        <input type="text" id="cmdName" placeholder="e.g., Process Emails" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="cmdDescription">Description *</label>
+                        <textarea id="cmdDescription" rows="2" placeholder="What does this command do?" required></textarea>
+                    </div>
+                </section>
+
+                <!-- Section 2: Examples -->
+                <section class="editor-section">
+                    <h3>💡 Example Phrases (Optional)</h3>
+                    <p class="help-text">Provide 2-5 example phrases to help the AI understand your command</p>
+                    <div id="examplesContainer">
+                        <div class="example-row">
+                            <input type="text" class="example-input" placeholder="e.g., 'run emails for sahar@gmail.com'">
+                            <button class="btn-icon" onclick="removeExample(this)">−</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm" onclick="addExample()">+ Add Example</button>
+                </section>
+
+                <!-- Section 3: Parameters -->
+                <section class="editor-section">
+                    <h3>🔧 Parameters</h3>
+                    <div class="params-table-container">
+                        <table class="params-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Required</th>
+                                    <th>Description</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="paramsTableBody">
+                                <tr class="param-row">
+                                    <td><input type="text" class="param-name" placeholder="email"></td>
+                                    <td>
+                                        <select class="param-type">
+                                            <option value="string">string</option>
+                                            <option value="number">number</option>
+                                            <option value="email">email</option>
+                                            <option value="url">url</option>
+                                            <option value="boolean">boolean</option>
+                                        </select>
+                                    </td>
+                                    <td><input type="checkbox" class="param-required"></td>
+                                    <td><input type="text" class="param-description" placeholder="The email address"></td>
+                                    <td><button class="btn-icon" onclick="removeParam(this)">−</button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <button class="btn btn-sm" onclick="addParam()">+ Add Parameter</button>
+                </section>
+
+                <!-- Section 4: Action -->
+                <section class="editor-section">
+                    <h3>⚡ Action</h3>
+                    <div class="action-type-selector">
+                        <label class="radio-label">
+                            <input type="radio" name="actionType" value="script" checked onchange="toggleActionType()">
+                            <span>Run Script</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="actionType" value="http" onchange="toggleActionType()">
+                            <span>Call HTTP</span>
+                        </label>
+                    </div>
+
+                    <!-- Script Action -->
+                    <div id="scriptAction" class="action-config">
+                        <div class="form-group">
+                            <label for="scriptPath">Script Path *</label>
+                            <input type="text" id="scriptPath" placeholder="~/scripts/process_emails.py">
+                        </div>
+                        <div class="form-group">
+                            <label for="argsTemplate">Arguments Template</label>
+                            <input type="text" id="argsTemplate" placeholder="--email={email} --days={days}">
+                            <small class="help-text" id="scriptHelpText">Use {param_name} for parameters</small>
+                        </div>
+                    </div>
+
+                    <!-- HTTP Action -->
+                    <div id="httpAction" class="action-config" style="display: none;">
+                        <div class="form-group">
+                            <label for="httpMethod">Method</label>
+                            <select id="httpMethod">
+                                <option value="GET">GET</option>
+                                <option value="POST" selected>POST</option>
+                                <option value="PUT">PUT</option>
+                                <option value="DELETE">DELETE</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="httpUrl">URL *</label>
+                            <input type="text" id="httpUrl" placeholder="http://localhost:3000/api/music/play">
+                        </div>
+                        <div class="form-group">
+                            <label>Headers (Optional)</label>
+                            <div id="headersContainer">
+                                <div class="header-row">
+                                    <input type="text" class="header-key" placeholder="Content-Type">
+                                    <input type="text" class="header-value" placeholder="application/json">
+                                    <button class="btn-icon" onclick="removeHeader(this)">−</button>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm" onclick="addHeader()">+ Add Header</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="httpBody">Body Template (JSON)</label>
+                            <textarea id="httpBody" rows="4" placeholder='{"query": "{query}"}'></textarea>
+                            <small class="help-text" id="httpHelpText">Use {param_name} for parameters</small>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="editor-footer">
+                <button class="btn btn-secondary" onclick="closeCommandEditor()">Cancel</button>
+                <button class="btn btn-primary" id="saveCommandBtn" onclick="saveCommand()">Save Command</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
