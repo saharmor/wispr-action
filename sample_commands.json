@@ -27,7 +27,7 @@
     "action": {
       "type": "script",
       "script_path": "~/scripts/process_emails.py",
-      "args_template": "--email={email} --days={days}"
+      "args_template": "--email={email} [--days={days}]"
     }
   },
   "sample_refresh_events": {
@@ -123,7 +123,32 @@
           "value": "application/json"
         }
       ],
-      "body_template": "{\"text\": \"{text}\", \"title\": \"{title}\"}"
+      "body_template": "{\"text\": \"{text}\"[, \"title\": \"{title}\"]}"
+    }
+  },
+  "sample_refresh_calendar": {
+    "id": "sample_refresh_calendar",
+    "name": "Refresh Calendar",
+    "description": "Refresh calendar events. Can refresh a specific calendar by ID or all calendars if no ID is provided.",
+    "enabled": false,
+    "example_phrases": [
+      "refresh calendar",
+      "refresh all calendars",
+      "refresh calendar 5",
+      "refresh calendar number 3"
+    ],
+    "parameters": [
+      {
+        "name": "calendar_id",
+        "type": "number",
+        "required": false,
+        "description": "Optional calendar ID. If not provided, refreshes all calendars."
+      }
+    ],
+    "action": {
+      "type": "script",
+      "script_path": "~/scripts/refresh_calendar.py",
+      "args_template": "[--calendar-id={calendar_id}]"
     }
   }
 }

@@ -155,7 +155,7 @@ def build_command_string(script_path: str, python_interpreter: str = "",
     return f"{base_cmd} {args_str}" if args_str else base_cmd
 
 
-def prepare_execution_environment(action: Dict, parameters: Dict, command: Dict) -> Tuple[str, str, str, Dict]:
+def prepare_execution_environment(action: Dict, parameters: Dict, command: Dict) -> Tuple[str, str, str, Dict, Dict]:
     """
     Prepare all execution parameters (paths, command, environment).
     
@@ -165,7 +165,7 @@ def prepare_execution_environment(action: Dict, parameters: Dict, command: Dict)
         command: Full command definition
         
     Returns:
-        Tuple of (script_path, full_command, cwd, env_dict)
+        Tuple of (script_path, full_command, cwd, env_dict, env_vars_only)
     """
     # Get working directory first (needed for resolving relative paths)
     cwd = action.get('working_directory')
@@ -206,12 +206,13 @@ def prepare_execution_environment(action: Dict, parameters: Dict, command: Dict)
     
     # Load environment variables
     env = os.environ.copy()
+    env_vars = {}
     env_file = action.get('env_file', '')
     if env_file:
         env_vars = load_env_vars(env_file)
         env.update(env_vars)
     
-    return script_path, full_command, cwd, env
+    return script_path, full_command, cwd, env, env_vars
 
 
 def generate_terminal_applescript(full_command: str, cwd: Optional[str], 
@@ -245,8 +246,10 @@ def generate_terminal_applescript(full_command: str, cwd: Optional[str],
     
     # AppleScript that launches the terminal and returns the window ID
     return f'''tell application "Terminal"
+    activate
     set newTab to do script "{terminal_command_escaped}"
     set newWindow to first window whose tabs contains newTab
+    set index of newWindow to 1
     return id of newWindow
 end tell'''
 
@@ -279,7 +282,7 @@ def generate_monitor_applescript(window_id: str) -> str:
 end tell'''
 
 
-def execute_in_foreground(full_command: str, cwd: Optional[str], action: Dict,
+def execute_in_foreground(full_command: str, cwd: Optional[str], env_vars: Dict,
                          command: Dict, start_time: datetime) -> ExecutionResult:
     """
     Execute command in foreground (visible terminal window).
@@ -287,19 +290,13 @@ def execute_in_foreground(full_command: str, cwd: Optional[str], action: Dict,
     Args:
         full_command: Complete command string
         cwd: Working directory
-        action: Action definition
+        env_vars: Environment variables to export in terminal
         command: Command definition
         start_time: Execution start time
         
     Returns:
         ExecutionResult
     """
-    # Load env vars for AppleScript
-    env_vars = {}
-    env_file = action.get('env_file', '')
-    if env_file:
-        env_vars = load_env_vars(env_file)
-    
     # Generate AppleScript
     applescript = generate_terminal_applescript(full_command, cwd, env_vars)
     
@@ -390,17 +387,25 @@ def execute_in_background(full_command: str, cwd: Optional[str], env: Dict,
 
 def interpolate_parameters(template: str, parameters: Dict[str, Any], command: Optional[Dict] = None) -> str:
     """
-    Interpolate parameters into a template string.
+    Interpolate parameters into a template string with optional sections.
     
     Replaces {param_name} with parameter values. Handles both original and sanitized parameter names.
     
+    Optional sections can be denoted with square brackets []. If any parameter within a bracketed
+    section is missing or None, the entire section is omitted from the result.
+    
+    Examples:
+        "[--id={id}]" → "--id=5" if id=5, "" if id is missing
+        "required [--optional={opt}]" → "required --optional=foo" or just "required"
+        "[--calendar-id={calendar_id}] [--days={days}]" → includes only provided params
+    
     Args:
-        template: Template string with {param} placeholders
+        template: Template string with {param} placeholders and optional [...] sections
         parameters: Dictionary of parameter values (may use sanitized names)
         command: Optional command definition to map original names to sanitized names
         
     Returns:
-        Interpolated string
+        Interpolated string with optional sections processed
     """
     result = template
     
@@ -421,11 +426,51 @@ def interpolate_parameters(template: str, parameters: Dict[str, Any], command: O
         # No command provided, use parameters as-is
         param_map = parameters
     
-    # Replace placeholders in template
+    # Process conditional sections first: [...] where content may contain {param} placeholders
+    def process_conditional(match):
+        """Process a single conditional section."""
+        content = match.group(1)
+        
+        # Find all {param} placeholders in this section
+        params_in_section = re.findall(r'\{([^}]+)\}', content)
+        
+        # Check if all parameters in this section are available and non-empty
+        all_present = True
+        for param_name in params_in_section:
+            value = param_map.get(param_name)
+            if value is None or value == '':
+                all_present = False
+                break
+        
+        # If all present, interpolate and return; otherwise return empty string
+        if all_present:
+            interpolated = content
+            for param_name in params_in_section:
+                value = param_map[param_name]
+                placeholder = "{" + param_name + "}"
+                
+                # Convert value to string
+                if isinstance(value, (int, float, bool)):
+                    str_value = str(value)
+                elif isinstance(value, str):
+                    str_value = value
+                else:
+                    str_value = json.dumps(value)
+                
+                interpolated = interpolated.replace(placeholder, str_value)
+            return interpolated
+        else:
+            return ''
+    
+    # Process all conditional sections (non-nested only)
+    result = re.sub(r'\[([^\[\]]+)\]', process_conditional, result)
+    
+    # Now interpolate remaining (required) parameters outside of brackets
     for key, value in param_map.items():
         if value is None:
             continue
         placeholder = "{" + key + "}"
+        
         # Convert value to string appropriately
         if isinstance(value, (int, float, bool)):
             str_value = str(value)
@@ -435,6 +480,16 @@ def interpolate_parameters(template: str, parameters: Dict[str, Any], command: O
             str_value = json.dumps(value)
         
         result = result.replace(placeholder, str_value)
+    
+    # Clean up extra whitespace that may have been left by removed sections
+    result = ' '.join(result.split())
+    
+    # Remove any unreplaced placeholders (parameters that were None or not provided)
+    # This handles cases where optional parameters in non-bracketed sections weren't replaced
+    result = re.sub(r'\{[^}]+\}', '', result)
+    
+    # Clean up whitespace again after removing placeholders
+    result = ' '.join(result.split())
     
     return result
 
@@ -475,7 +530,7 @@ def execute_script(
     
     try:
         # Prepare all execution parameters
-        script_path, full_command, cwd, env = prepare_execution_environment(
+        script_path, full_command, cwd, env, env_vars = prepare_execution_environment(
             action, parameters, command
         )
         
@@ -488,7 +543,7 @@ def execute_script(
         
         # Execute based on mode
         if run_foreground:
-            return execute_in_foreground(full_command, cwd, action, command, start_time)
+            return execute_in_foreground(full_command, cwd, env_vars, command, start_time)
         else:
             return execute_in_background(full_command, cwd, env, command, start_time)
     

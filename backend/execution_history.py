@@ -38,13 +38,20 @@ def init_database():
                 command_id TEXT NOT NULL,
                 command_name TEXT NOT NULL,
                 parameters TEXT,
-                success INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                success INTEGER,
                 output TEXT,
                 error TEXT,
                 duration REAL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Add status column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE execution_history ADD COLUMN status TEXT NOT NULL DEFAULT 'running'")
+        except:
+            pass  # Column already exists
         
         # Create index on timestamp for faster queries
         cursor.execute("""
@@ -55,7 +62,7 @@ def init_database():
         print(f"✓ Execution history database initialized at: {DB_PATH}")
 
 
-def add_execution_log(log_entry: Dict) -> int:
+def add_execution_log(log_entry: Dict, status: str = 'completed') -> int:
     """
     Add an execution log entry to the database.
     
@@ -65,6 +72,7 @@ def add_execution_log(log_entry: Dict) -> int:
             - command_id: Command ID
             - parameters: Dictionary of parameters
             - result: ExecutionResult dict with success, output, error, etc.
+        status: Execution status ('running', 'completed', 'failed')
     
     Returns:
         ID of the inserted record
@@ -76,13 +84,14 @@ def add_execution_log(log_entry: Dict) -> int:
         
         cursor.execute("""
             INSERT INTO execution_history 
-            (timestamp, command_id, command_name, parameters, success, output, error, duration)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, command_id, command_name, parameters, status, success, output, error, duration)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             log_entry['timestamp'],
             log_entry['command_id'],
             result.get('command_name', ''),
             json.dumps(log_entry.get('parameters', {})),
+            status,
             1 if result.get('success') else 0,
             result.get('output', ''),
             result.get('error', ''),
@@ -90,6 +99,71 @@ def add_execution_log(log_entry: Dict) -> int:
         ))
         
         return cursor.lastrowid
+
+
+def start_execution_log(command_id: str, command_name: str, parameters: Dict) -> int:
+    """
+    Create a log entry for a command that just started executing.
+    
+    Args:
+        command_id: Command ID
+        command_name: Command name
+        parameters: Dictionary of parameters
+    
+    Returns:
+        ID of the inserted record
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO execution_history 
+            (timestamp, command_id, command_name, parameters, status, success, output, error, duration)
+            VALUES (?, ?, ?, ?, 'running', NULL, '', '', 0.0)
+        """, (
+            datetime.now().isoformat(),
+            command_id,
+            command_name,
+            json.dumps(parameters)
+        ))
+        
+        return cursor.lastrowid
+
+
+def update_execution_log(log_id: int, result: Dict) -> bool:
+    """
+    Update an execution log with the final result.
+    
+    Args:
+        log_id: ID of the log entry to update
+        result: ExecutionResult dict with success, output, error, duration
+    
+    Returns:
+        True if updated successfully
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        status = 'completed' if result.get('success') else 'failed'
+        
+        cursor.execute("""
+            UPDATE execution_history 
+            SET status = ?,
+                success = ?,
+                output = ?,
+                error = ?,
+                duration = ?
+            WHERE id = ?
+        """, (
+            status,
+            1 if result.get('success') else 0,
+            result.get('output', ''),
+            result.get('error', ''),
+            result.get('duration', 0.0),
+            log_id
+        ))
+        
+        return cursor.rowcount > 0
 
 
 def get_execution_logs(limit: int = 20, offset: int = 0) -> List[Dict]:
@@ -112,6 +186,7 @@ def get_execution_logs(limit: int = 20, offset: int = 0) -> List[Dict]:
                 command_id,
                 command_name,
                 parameters,
+                status,
                 success,
                 output,
                 error,
@@ -133,7 +208,8 @@ def get_execution_logs(limit: int = 20, offset: int = 0) -> List[Dict]:
                 'result': {
                     'command_id': row['command_id'],
                     'command_name': row['command_name'],
-                    'success': bool(row['success']),
+                    'status': row['status'],
+                    'success': bool(row['success']) if row['success'] is not None else None,
                     'output': row['output'] or '',
                     'error': row['error'] or '',
                     'duration': row['duration'] or 0.0,

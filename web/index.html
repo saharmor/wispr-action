@@ -105,7 +105,7 @@
                         </tbody>
                     </table>
                     <div class="load-more-container">
-                        <button id="loadMoreHistoryBtn" class="btn btn-secondary" onclick="loadMoreHistory()">Load More</button>
+                        <button id="loadMoreHistoryBtn" class="btn btn-secondary" onclick="loadMoreHistory()" style="display: none;">Load More</button>
                     </div>
                 </div>
             </section>
@@ -242,7 +242,11 @@
                         <div class="form-group">
                             <label for="argsTemplate">Arguments Template</label>
                             <input type="text" id="argsTemplate" placeholder="Define parameters above to see examples">
-                            <small class="help-text" id="scriptHelpText">Required if you define parameters above. Use <code>{param_name}</code> to reference your parameters. Examples: <code>--email={email}</code> or <code>{email}</code> for positional args</small>
+                            <small class="help-text" id="scriptHelpText">
+                                Use <code>{param_name}</code> to reference parameters. 
+                                <strong>For optional parameters</strong>, wrap them in brackets: <code>[--flag={optional_param}]</code>.
+                                <br>Examples: <code>--email={email} [--days={days}]</code> or <code>{file} [--format={format}]</code>
+                            </small>
                         </div>
                         
                         <!-- Python-specific options (collapsible) -->
@@ -303,7 +307,10 @@
                         <div class="form-group">
                             <label for="httpBody">Body Template (JSON)</label>
                             <textarea id="httpBody" rows="4" placeholder='{"query": "{query}"}'></textarea>
-                            <small class="help-text" id="httpHelpText">Use {param_name} for parameters</small>
+                            <small class="help-text" id="httpHelpText">
+                                Use <code>{param_name}</code> for parameters. 
+                                <strong>For optional fields</strong>, wrap in brackets: <code>{"text": "{text}"[, "title": "{title}"]}</code>
+                            </small>
                         </div>
                     </div>
                 </section>

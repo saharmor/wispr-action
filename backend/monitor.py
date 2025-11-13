@@ -12,6 +12,7 @@ from config import WISPR_DB_PATH, ACTIVATION_WORD, POLL_INTERVAL, WEB_PORT, LOGS
 from parser import parse_command
 from executor import execute, log_execution, ExecutionResult
 from command_manager import get_command_manager
+from execution_history import start_execution_log, update_execution_log
 
 
 class WisprMonitor:
@@ -138,13 +139,24 @@ class WisprMonitor:
         # Get command to check for custom timeout
         manager = get_command_manager()
         command = manager.get_command(parse_result['command_id'])
+        command_name = command['name'] if command else parse_result['command_name']
         timeout = command.get('timeout') if command else None
+        
+        # Create log entry with "running" status BEFORE execution
+        log_id = start_execution_log(
+            parse_result['command_id'],
+            command_name,
+            parse_result['parameters']
+        )
         
         result = execute(
             command_id=parse_result['command_id'],
             parameters=parse_result['parameters'],
             timeout=timeout
         )
+        
+        # Update the log entry with the result
+        update_execution_log(log_id, result.to_dict())
         
         # Display result
         if result.success:
@@ -158,7 +170,7 @@ class WisprMonitor:
         
         print(f"\n{'='*60}\n")
         
-        # Log execution
+        # Log execution to file as well
         log_execution(result, os.path.join(LOGS_DIR, 'executions.log'))
         
         return result
@@ -181,7 +193,7 @@ class WisprMonitor:
                     text = self.get_transcript_text(new_transcript)
                     
                     # Check for activation word
-                    if self.contains_activation_word(text):
+                    if self.contains_activation_word(new_transcript['asrText']):
                         print(f"\nNew command transcript detected!")
                         print(f"   ID: {new_transcript['id']}")
                         print(f"   Timestamp: {new_transcript['timestamp']}")

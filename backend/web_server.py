@@ -15,7 +15,7 @@ from parser import parse_command
 from executor import execute
 from monitor import get_monitor
 from config import WEB_PORT
-from execution_history import add_execution_log, get_execution_logs, get_execution_count
+from execution_history import add_execution_log, get_execution_logs, get_execution_count, start_execution_log, update_execution_log
 
 
 app = Flask(__name__, static_folder='../web', static_url_path='')
@@ -229,19 +229,21 @@ def execute_command():
     if not command_id:
         return error_response("No command_id provided", HTTP_BAD_REQUEST)
     
+    # Get command name before execution
+    manager = get_command_manager()
+    command = manager.get_command(command_id)
+    command_name = command['name'] if command else 'Unknown Command'
+    
+    # Create log entry with "running" status BEFORE execution
+    log_id = start_execution_log(command_id, command_name, parameters)
+    
     # Execute the command
     result = execute(command_id, parameters, confirm_mode=False, timeout=timeout)
     
-    # Add to database
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "command_id": command_id,
-        "parameters": parameters,
-        "result": result.to_dict()
-    }
-    add_execution_log(log_entry)
+    # Update the log entry with the result
+    update_execution_log(log_id, result.to_dict())
     
-    return success_response({"result": result.to_dict()})
+    return success_response({"result": result.to_dict(), "log_id": log_id})
 
 
 @app.route('/api/monitor/status', methods=['GET'])

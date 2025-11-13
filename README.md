@@ -74,7 +74,7 @@ Commands are managed through the web dashboard interface. Creating new commands 
 
 ### Example Commands
 
-#### Script Command
+#### Script Command with Optional Parameters
 ```
 Name: Process Emails
 Description: Run email processing script for a given inbox
@@ -83,10 +83,14 @@ Parameters:
   - days (number, optional): Days back to process
 Action: Run Script
   Path: ~/scripts/process_emails.py
-  Args: --email={email} --days={days}
+  Args: --email={email} [--days={days}]
 ```
 
-**Usage**: "Command, run email processor for sahar@gmail.com"
+**Usage**: 
+- "Command, run email processor for sahar@gmail.com" (uses default days)
+- "Command, process emails for sahar@gmail.com from last 30 days" (specifies days)
+
+**Note**: Wrap optional parameters in square brackets `[]` in your template. See [OPTIONAL_PARAMETERS.md](OPTIONAL_PARAMETERS.md) for details.
 
 #### Script Command with Virtual Environment
 For scripts that require a specific Python environment and environment variables:

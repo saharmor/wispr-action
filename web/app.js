@@ -7,7 +7,8 @@ const state = {
     lastParseResult: null,
     currentView: 'commands', // 'commands' or 'history'
     executionHistory: [],
-    historyOffset: 0
+    historyOffset: 0,
+    historyPollInterval: null // Store interval ID for cleanup
 };
 
 // API Base URL
@@ -68,12 +69,32 @@ async function apiCall(endpoint, options = {}) {
         
         return data;
     } catch (error) {
-        console.error('API Error:', error);
+        // Check if this is a network/connection error (backend is down)
+        const isConnectionError = error instanceof TypeError && 
+                                  (error.message.includes('fetch') || 
+                                   error.message.includes('Failed to fetch') ||
+                                   error.message.includes('NetworkError'));
+        
+        // Use better messaging for connection errors
+        const errorMessage = isConnectionError 
+            ? 'Backend is not responding. Please make sure the backend server is running.'
+            : error.message;
+        
+        // Only log to console if it's not a connection error (reduces noise)
+        if (!isConnectionError) {
+            console.error('API Error:', error);
+        }
+        
         // For execution endpoint, let the caller handle the error display
         if (!endpoint.includes('/api/commands/execute')) {
-            showModal(error.message, 'Error', 'error');
+            showModal(errorMessage, isConnectionError ? 'Connection Error' : 'Error', 'error');
         }
-        throw error;
+        
+        // Create a new error with the better message
+        const enhancedError = new Error(errorMessage);
+        enhancedError.originalError = error;
+        enhancedError.isConnectionError = isConnectionError;
+        throw enhancedError;
     }
 }
 
@@ -84,7 +105,10 @@ async function loadCommands() {
         state.commands = data.commands || [];
         renderCommandList();
     } catch (error) {
-        console.error('Failed to load commands:', error);
+        // Only log if it's not a connection error (modal already shown)
+        if (!error.isConnectionError) {
+            console.error('Failed to load commands:', error);
+        }
     }
 }
 
@@ -1129,7 +1153,10 @@ async function loadMonitorStatus() {
         state.monitorStatus = data.status;
         updateMonitorUI();
     } catch (error) {
-        console.error('Failed to load monitor status:', error);
+        // Only log if it's not a connection error (modal already shown)
+        if (!error.isConnectionError) {
+            console.error('Failed to load monitor status:', error);
+        }
     }
 }
 
@@ -1468,10 +1495,48 @@ async function loadExecutionHistory(limit = 20) {
         const data = await apiCall(`/api/logs?limit=${limit}`);
         state.executionHistory = data.logs || [];
         state.historyOffset = state.executionHistory.length;
+        
+        // Show/hide load more button based on whether there's more data
+        const loadMoreBtn = document.getElementById('loadMoreHistoryBtn');
+        if (loadMoreBtn) {
+            loadMoreBtn.style.display = data.has_more ? 'block' : 'none';
+        }
+        
         renderHistoryView();
     } catch (error) {
-        console.error('Failed to load execution history:', error);
-        showToast('Failed to load history', 'error');
+        // Only show toast if it's not a connection error (modal already shown)
+        if (!error.isConnectionError) {
+            console.error('Failed to load execution history:', error);
+            showToast('Failed to load history', 'error');
+        }
+    }
+}
+
+/**
+ * Start polling for history updates
+ */
+function startHistoryPolling() {
+    // Clear any existing interval
+    stopHistoryPolling();
+    
+    // Poll every 3 seconds to catch new executions from voice/other sources
+    state.historyPollInterval = setInterval(() => {
+        if (state.currentView === 'history') {
+            loadExecutionHistory();
+        } else {
+            // Stop polling if we switched away from history view
+            stopHistoryPolling();
+        }
+    }, 3000);
+}
+
+/**
+ * Stop polling for history updates
+ */
+function stopHistoryPolling() {
+    if (state.historyPollInterval) {
+        clearInterval(state.historyPollInterval);
+        state.historyPollInterval = null;
     }
 }
 
@@ -1499,8 +1564,11 @@ async function loadMoreHistory() {
         renderHistoryView();
         showToast(`Loaded ${newLogs.length} more entries`, 'info', 2000);
     } catch (error) {
-        console.error('Failed to load more history:', error);
-        showToast('Failed to load more history', 'error');
+        // Only show toast if it's not a connection error (modal already shown)
+        if (!error.isConnectionError) {
+            console.error('Failed to load more history:', error);
+            showToast('Failed to load more history', 'error');
+        }
     }
 }
 
@@ -1515,19 +1583,31 @@ function switchView(viewName) {
     const commandsTab = document.getElementById('commandsTab');
     const historyTab = document.getElementById('historyTab');
     
+    // Also update the duplicate tabs in history section
+    const commandsTab2 = document.getElementById('commandsTab2');
+    const historyTab2 = document.getElementById('historyTab2');
+    
     if (viewName === 'commands') {
         commandSection.style.display = 'block';
         historySection.style.display = 'none';
         commandsTab.classList.add('active');
         historyTab.classList.remove('active');
+        if (commandsTab2) commandsTab2.classList.add('active');
+        if (historyTab2) historyTab2.classList.remove('active');
+        
+        // Stop polling when leaving history view
+        stopHistoryPolling();
     } else {
         commandSection.style.display = 'none';
         historySection.style.display = 'block';
         commandsTab.classList.remove('active');
         historyTab.classList.add('active');
+        if (commandsTab2) commandsTab2.classList.remove('active');
+        if (historyTab2) historyTab2.classList.add('active');
         
-        // Load history when switching to history view
+        // Load history and start continuous polling
         loadExecutionHistory();
+        startHistoryPolling();
     }
 }
 
@@ -1538,18 +1618,15 @@ function renderHistoryView() {
     const historyBody = document.getElementById('historyTableBody');
     const emptyState = document.getElementById('historyEmptyState');
     const tableContainer = document.getElementById('historyTableContainer');
-    const loadMoreBtn = document.getElementById('loadMoreHistoryBtn');
     
     if (state.executionHistory.length === 0) {
         emptyState.style.display = 'block';
         tableContainer.style.display = 'none';
-        loadMoreBtn.style.display = 'none';
         return;
     }
     
     emptyState.style.display = 'none';
     tableContainer.style.display = 'block';
-    loadMoreBtn.style.display = 'block';
     
     historyBody.innerHTML = state.executionHistory.map(log => {
         const result = log.result;
@@ -1568,12 +1645,23 @@ function renderHistoryView() {
         }
         
         // Status badge
-        const statusClass = result.success ? 'status-success' : 'status-error';
-        const statusText = result.success ? 'Success' : 'Failed';
+        let statusClass, statusText;
+        if (result.status === 'running') {
+            statusClass = 'status-running';
+            statusText = 'Running';
+        } else if (result.success) {
+            statusClass = 'status-success';
+            statusText = 'Success';
+        } else {
+            statusClass = 'status-error';
+            statusText = 'Failed';
+        }
         
         // Output or error
         let outputHtml = '';
-        if (result.success && result.output) {
+        if (result.status === 'running') {
+            outputHtml = '<div class="running-indicator"><span class="spinner"></span> Executing...</div>';
+        } else if (result.success && result.output) {
             outputHtml = `<pre class="output-block">${escapeHtml(result.output)}</pre>`;
         } else if (!result.success && result.error) {
             outputHtml = `<pre class="output-block error-output">${escapeHtml(result.error)}</pre>`;

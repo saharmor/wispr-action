@@ -46,7 +46,11 @@ def parse_command(transcript_text: str) -> Dict[str, Any]:
             "You are a voice command router. The user will speak a command, "
             "and you must determine which tool to use and extract the relevant parameters. "
             "Choose the most appropriate tool based on the user's intent. "
-            "If no tool matches, respond with a brief explanation."
+            "\n\nIMPORTANT: For optional parameters (not in the 'required' list), "
+            "ONLY provide them if the user explicitly mentions a specific value. "
+            "Do NOT infer, guess, or provide default values for optional parameters. "
+            "If the user says 'all' or doesn't specify an optional parameter, omit it entirely. "
+            "\n\nIf no tool matches, respond with a brief explanation."
         )
         
         # Call Claude with tools

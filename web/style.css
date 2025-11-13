@@ -1530,6 +1530,18 @@ h1 {
     border: 1px solid #ef4444;
 }
 
+.status-running {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #3b82f6;
+    animation: pulse-badge 2s infinite;
+}
+
+@keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
 /* Output/Error Display */
 .output-block {
     font-family: 'Monaco', 'Courier New', monospace;
@@ -1585,7 +1597,29 @@ h1 {
     display: flex;
     justify-content: center;
     padding: var(--space-lg) 0;
-    border-top: 1px solid var(--border-light);
     margin-top: var(--space-md);
+}
+
+/* Running Indicator */
+.running-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--info-color);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-light);
+    border-top-color: var(--info-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 

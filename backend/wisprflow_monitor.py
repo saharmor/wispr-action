@@ -8,6 +8,7 @@ from datetime import datetime
 from parser import parse_command
 from config import CONFIRM_MODE, WISPR_DB_PATH
 from executor import execute
+from execution_history import start_execution_log, update_execution_log
 
 def get_db_connection():
     """Get a connection to the Wispr Flow database.
@@ -165,7 +166,16 @@ def process_command(text, personalization_style=None):
     from command_manager import get_command_manager
     manager = get_command_manager()
     command = manager.get_command(result['command_id'])
+    command_name = command['name'] if command else result.get('command_name')
     timeout = command.get('timeout') if command else None
+    
+    # Create log entry with "running" status BEFORE execution
+    log_id = start_execution_log(
+        result['command_id'],
+        command_name,
+        result['parameters']
+    )
+    print(f"📝 Created history log entry (ID: {log_id})")
     
     exec_result = execute(
         command_id=result['command_id'],
@@ -174,12 +184,16 @@ def process_command(text, personalization_style=None):
         timeout=timeout
     )
     
+    # Update the log entry with the result
+    update_execution_log(log_id, exec_result.to_dict())
+    
     # Show execution result
     if exec_result.success:
         print(f"✅ Execution succeeded: {exec_result.output}")
     else:
         print(f"❌ Execution failed: {exec_result.error}")
     
+    print(f"📝 Updated history log entry (status: {'completed' if exec_result.success else 'failed'})")
     print(f"\n{'='*60}\n")
     return True
 
