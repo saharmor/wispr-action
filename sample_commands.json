@@ -150,6 +150,37 @@
       "script_path": "~/scripts/refresh_calendar.py",
       "args_template": "[--calendar-id={calendar_id}]"
     }
+  },
+  "speak": {
+    "id": "speak",
+    "name": "Speak Text",
+    "description": "Speak a phrase out loud using text-to-speech. Optionally sleep for a specified period and then say 'finished talking'.",
+    "enabled": true,
+    "example_phrases": [
+      "speak hello world",
+      "say good morning",
+      "speak remind me to take a break for 5 seconds",
+      "say timer started for 10 seconds"
+    ],
+    "parameters": [
+      {
+        "name": "phrase",
+        "type": "string",
+        "required": true,
+        "description": "The text phrase to speak out loud"
+      },
+      {
+        "name": "sleep",
+        "type": "number",
+        "required": false,
+        "description": "Optional sleep period in seconds. After speaking the phrase, will wait this many seconds and then say 'finished talking'."
+      }
+    ],
+    "action": {
+      "type": "script",
+      "script_path": "backend/speak.py",
+      "args_template": "{phrase} [--sleep={sleep}]"
+    }
   }
 }
 

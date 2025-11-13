@@ -8,6 +8,7 @@ import time
 from config import validate_config, get_config_summary
 from web_server import run_server
 from tray_app import run_tray_app
+from monitor import get_monitor
 
 
 def print_banner():
@@ -71,6 +72,11 @@ def main():
     
     # Give web server a moment to start
     time.sleep(1)
+    
+    # Auto-start the monitor
+    print("\nAuto-starting monitor...")
+    monitor = get_monitor()
+    monitor.start()
     
     # Run system tray app (blocks until quit)
     try:

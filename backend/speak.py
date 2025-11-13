@@ -36,11 +36,22 @@ def main():
         nargs="+",
         help="The phrase to speak out loud"
     )
+    parser.add_argument(
+        "--sleep",
+        type=int,
+        required=False,
+        help="Optional sleep period in seconds after speaking before saying 'finished talking'"
+    )
     
     args = parser.parse_args()
     phrase = " ".join(args.phrase)
     
     speak(phrase)
+    
+    # If sleep period is specified, sleep and then say "finished talking"
+    if args.sleep is not None:
+        time.sleep(args.sleep)
+        speak("finished talking")
 
 
 if __name__ == "__main__":
