@@ -1,0 +1,130 @@
+{
+  "sample_email_processor": {
+    "id": "sample_email_processor",
+    "name": "Process Emails",
+    "description": "Run email processing script for a given inbox address",
+    "enabled": false,
+    "timeout": 120,
+    "example_phrases": [
+      "run emails for sahar@gmail.com",
+      "process emails for team@acme.com",
+      "run email processor for john@example.com from last 7 days"
+    ],
+    "parameters": [
+      {
+        "name": "email",
+        "type": "email",
+        "required": true,
+        "description": "The inbox email address to process"
+      },
+      {
+        "name": "days",
+        "type": "number",
+        "required": false,
+        "description": "How many days back to process (default: 7)"
+      }
+    ],
+    "action": {
+      "type": "script",
+      "script_path": "~/scripts/process_emails.py",
+      "args_template": "--email={email} --days={days}"
+    }
+  },
+  "sample_refresh_events": {
+    "id": "sample_refresh_events",
+    "name": "Refresh Submitted Events",
+    "description": "Refresh submitted events for a calendar using virtualenv and environment file",
+    "enabled": false,
+    "run_foreground": true,
+    "example_phrases": [
+      "refresh submitted events for calendar 1",
+      "refresh events for calendar 2",
+      "update submitted events for calendar 3"
+    ],
+    "parameters": [
+      {
+        "name": "calendar_id",
+        "type": "number",
+        "required": true,
+        "description": "The calendar ID to refresh events for"
+      }
+    ],
+    "action": {
+      "type": "script",
+      "script_path": "~/luma-automator/backend/scripts/refresh_submitted_events.py",
+      "args_template": "{calendar_id}",
+      "python_interpreter": "~/luma-automator/backend/venv/bin/python",
+      "env_file": "~/luma-automator/backend/.env",
+      "working_directory": "~/luma-automator/backend"
+    }
+  },
+  "sample_play_music": {
+    "id": "sample_play_music",
+    "name": "Play Music",
+    "description": "Play music via local music API",
+    "enabled": false,
+    "example_phrases": [
+      "play bohemian rhapsody",
+      "play some jazz music",
+      "play the beatles"
+    ],
+    "parameters": [
+      {
+        "name": "query",
+        "type": "string",
+        "required": true,
+        "description": "The song, artist, or playlist to play"
+      }
+    ],
+    "action": {
+      "type": "http",
+      "url": "http://localhost:3000/api/music/play",
+      "method": "POST",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body_template": "{\"query\": \"{query}\"}"
+    }
+  },
+  "sample_create_note": {
+    "id": "sample_create_note",
+    "name": "Create Note",
+    "description": "Create a quick note with the given text",
+    "enabled": false,
+    "example_phrases": [
+      "create a note saying meeting notes from today",
+      "note: remember to buy milk",
+      "make a note that the deadline is Friday"
+    ],
+    "parameters": [
+      {
+        "name": "text",
+        "type": "string",
+        "required": true,
+        "description": "The content of the note"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "required": false,
+        "description": "Optional title for the note"
+      }
+    ],
+    "action": {
+      "type": "http",
+      "url": "http://localhost:3000/api/notes",
+      "method": "POST",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body_template": "{\"text\": \"{text}\", \"title\": \"{title}\"}"
+    }
+  }
+}
+

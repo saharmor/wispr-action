@@ -1,0 +1,428 @@
+"""Flask web server for command management UI."""
+
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from functools import wraps
+import os
+import json
+import logging
+from datetime import datetime
+from typing import Dict, Any, Optional, Tuple
+from flask_compress import Compress
+
+from command_manager import get_command_manager
+from parser import parse_command
+from executor import execute
+from monitor import get_monitor
+from config import WEB_PORT
+
+
+app = Flask(__name__, static_folder='web', static_url_path='')
+CORS(app)
+
+# ===== Performance & Compression =====
+# Disable jsonify pretty printing in production responses
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+# Encourage browser caching for static files; index is handled separately
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 60 * 60 * 24 * 30  # 30 days
+# Enable gzip compression for responses (including static assets)
+Compress(app)
+
+# ===== Constants =====
+MAX_LOGS = 50
+HTTP_OK = 200
+HTTP_CREATED = 201
+HTTP_BAD_REQUEST = 400
+HTTP_NOT_FOUND = 404
+HTTP_INTERNAL_ERROR = 500
+
+# Store recent execution logs in memory
+execution_logs = []
+
+
+# ===== Response Utilities =====
+
+def success_response(data: Optional[Dict[str, Any]] = None, status_code: int = HTTP_OK) -> Tuple[Dict, int]:
+    """
+    Create a standardized success response.
+    
+    Args:
+        data: Optional data to include in response
+        status_code: HTTP status code
+        
+    Returns:
+        Tuple of (response_dict, status_code)
+    """
+    response = {"success": True}
+    if data:
+        response.update(data)
+    return jsonify(response), status_code
+
+
+def error_response(error: str, status_code: int = HTTP_INTERNAL_ERROR) -> Tuple[Dict, int]:
+    """
+    Create a standardized error response.
+    
+    Args:
+        error: Error message
+        status_code: HTTP status code
+        
+    Returns:
+        Tuple of (response_dict, status_code)
+    """
+    return jsonify({
+        "success": False,
+        "error": error
+    }), status_code
+
+
+def handle_errors(f):
+    """
+    Decorator to handle exceptions in route handlers.
+    
+    Catches exceptions and returns standardized error responses.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except ValueError as e:
+            return error_response(str(e), HTTP_BAD_REQUEST)
+        except Exception as e:
+            return error_response(str(e), HTTP_INTERNAL_ERROR)
+    return decorated_function
+
+
+class HealthCheckFilter(logging.Filter):
+    """Filter out health check requests from logs."""
+    
+    def filter(self, record):
+        # Filter out GET requests to /api/monitor/status
+        return not (hasattr(record, 'getMessage') and 
+                   '/api/monitor/status' in record.getMessage())
+
+@app.after_request
+def add_security_and_cache_headers(response):
+    """
+    Add basic security and caching headers.
+    - Cache static assets aggressively
+    - Avoid caching index (so UI updates are picked up)
+    """
+    try:
+        path = request.path or ""
+        # Do not cache the main HTML shell
+        if path == "/" or path.endswith("/index.html"):
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        else:
+            # Cache static assets longer and mark immutable for better performance
+            if path.endswith(('.js', '.css', '.png', '.ico', '.svg', '.jpg', '.jpeg', '.webp')):
+                response.headers.setdefault('Cache-Control', 'public, max-age=604800, immutable')  # 7 days
+        # Light hardening
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    except Exception:
+        # Never fail the request on header addition
+        pass
+    return response
+
+
+@app.route('/')
+def index():
+    """Serve the main UI."""
+    return send_from_directory('web', 'index.html')
+
+
+@app.route('/api/commands', methods=['GET'])
+@handle_errors
+def get_commands():
+    """Get all commands."""
+    manager = get_command_manager()
+    commands = manager.get_all_commands()
+    return success_response({"commands": commands})
+
+
+@app.route('/api/commands', methods=['POST'])
+@handle_errors
+def create_command():
+    """Create a new command."""
+    data = request.json
+    manager = get_command_manager()
+    command = manager.add_command(data)
+    return success_response({"command": command}, HTTP_CREATED)
+
+
+@app.route('/api/commands/<command_id>', methods=['GET'])
+@handle_errors
+def get_command(command_id):
+    """Get a specific command."""
+    manager = get_command_manager()
+    command = manager.get_command(command_id)
+    
+    if not command:
+        return error_response("Command not found", HTTP_NOT_FOUND)
+    
+    return success_response({"command": command})
+
+
+@app.route('/api/commands/<command_id>', methods=['PUT'])
+@handle_errors
+def update_command(command_id):
+    """Update a command."""
+    data = request.json
+    manager = get_command_manager()
+    command = manager.update_command(command_id, data)
+    
+    if not command:
+        return error_response("Command not found", HTTP_NOT_FOUND)
+    
+    return success_response({"command": command})
+
+
+@app.route('/api/commands/<command_id>', methods=['DELETE'])
+@handle_errors
+def delete_command(command_id):
+    """Delete a command."""
+    manager = get_command_manager()
+    success = manager.delete_command(command_id)
+    
+    if not success:
+        return error_response("Command not found", HTTP_NOT_FOUND)
+    
+    return success_response({"message": "Command deleted"})
+
+
+@app.route('/api/commands/<command_id>/toggle', methods=['PATCH'])
+@handle_errors
+def toggle_command(command_id):
+    """Toggle command enabled status."""
+    manager = get_command_manager()
+    new_status = manager.toggle_command(command_id)
+    
+    if new_status is None:
+        return error_response("Command not found", HTTP_NOT_FOUND)
+    
+    return success_response({"enabled": new_status})
+
+
+@app.route('/api/commands/test', methods=['POST'])
+@handle_errors
+def test_command():
+    """Test parsing a command phrase."""
+    data = request.json
+    text = data.get('text', '')
+    
+    if not text:
+        return error_response("No text provided", HTTP_BAD_REQUEST)
+    
+    # Parse the command
+    result = parse_command(text)
+    return success_response({"parse_result": result})
+
+
+@app.route('/api/commands/execute', methods=['POST'])
+@handle_errors
+def execute_command():
+    """Execute a command with given parameters."""
+    data = request.json
+    command_id = data.get('command_id')
+    parameters = data.get('parameters', {})
+    timeout = data.get('timeout')  # Optional timeout in seconds
+    
+    if not command_id:
+        return error_response("No command_id provided", HTTP_BAD_REQUEST)
+    
+    # Execute the command
+    result = execute(command_id, parameters, confirm_mode=False, timeout=timeout)
+    
+    # Add to logs
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "command_id": command_id,
+        "parameters": parameters,
+        "result": result.to_dict()
+    }
+    execution_logs.insert(0, log_entry)
+    if len(execution_logs) > MAX_LOGS:
+        execution_logs.pop()
+    
+    return success_response({"result": result.to_dict()})
+
+
+@app.route('/api/monitor/status', methods=['GET'])
+@handle_errors
+def monitor_status():
+    """Get monitor status."""
+    monitor = get_monitor()
+    status = monitor.get_status()
+    return success_response({"status": status})
+
+
+@app.route('/api/monitor/start', methods=['POST'])
+@handle_errors
+def monitor_start():
+    """Start the monitor."""
+    monitor = get_monitor()
+    
+    if monitor.is_running:
+        return error_response("Monitor is already running", HTTP_BAD_REQUEST)
+    
+    monitor.start()
+    return success_response({"message": "Monitor started"})
+
+
+@app.route('/api/monitor/stop', methods=['POST'])
+@handle_errors
+def monitor_stop():
+    """Stop the monitor."""
+    monitor = get_monitor()
+    
+    if not monitor.is_running:
+        return error_response("Monitor is not running", HTTP_BAD_REQUEST)
+    
+    monitor.stop()
+    return success_response({"message": "Monitor stopped"})
+
+
+@app.route('/api/logs', methods=['GET'])
+@handle_errors
+def get_logs():
+    """Get recent execution logs."""
+    limit = request.args.get('limit', 20, type=int)
+    return success_response({"logs": execution_logs[:limit]})
+
+
+# ===== Path Validation Utilities =====
+
+PATH_TYPE_MESSAGES = {
+    'script_path': 'Script not found at: {}',
+    'python_interpreter': 'Python interpreter not found at: {}',
+    'working_directory': 'Directory not found: {}',
+    'env_file': 'Environment file not found: {}'
+}
+
+
+def resolve_validation_path(path: str, key: str, working_dir: Optional[str]) -> Optional[str]:
+    """
+    Resolve and validate a path.
+    
+    Args:
+        path: Path to resolve
+        key: Path type key
+        working_dir: Optional working directory for relative paths
+        
+    Returns:
+        Resolved path or None if cannot be validated
+    """
+    expanded_path = os.path.expanduser(path)
+    is_relative = not os.path.isabs(expanded_path)
+    
+    # For relative paths (except working_directory), we need a working directory
+    if is_relative and key != 'working_directory':
+        if working_dir:
+            return os.path.join(os.path.expanduser(working_dir), expanded_path)
+        else:
+            return None  # Cannot validate without working directory
+    
+    return expanded_path
+
+
+def create_validation_result(valid: bool, message: str, resolved_path: Optional[str] = None) -> Dict:
+    """
+    Create a validation result dictionary.
+    
+    Args:
+        valid: Whether the path is valid
+        message: Validation message
+        resolved_path: Optional resolved path
+        
+    Returns:
+        Validation result dictionary
+    """
+    result = {"valid": valid, "message": message}
+    if resolved_path:
+        result["resolved_path"] = resolved_path
+    return result
+
+
+def validate_single_path(key: str, path: str, working_dir: Optional[str]) -> Dict:
+    """
+    Validate a single path.
+    
+    Args:
+        key: Path type key
+        path: Path to validate
+        working_dir: Optional working directory for relative paths
+        
+    Returns:
+        Validation result dictionary
+    """
+    # Empty paths are allowed (they're optional)
+    if not path:
+        return create_validation_result(True, "")
+    
+    # Resolve path
+    full_path = resolve_validation_path(path, key, working_dir)
+    
+    if full_path is None:
+        return create_validation_result(
+            False, 
+            "Cannot validate relative path without a working directory"
+        )
+    
+    # Check if path exists
+    if os.path.exists(full_path):
+        return create_validation_result(True, "✓ Path exists", full_path)
+    
+    # Generate error message based on path type
+    error_template = PATH_TYPE_MESSAGES.get(key, "Path not found: {}")
+    return create_validation_result(False, error_template.format(full_path))
+
+
+@app.route('/api/validate-paths', methods=['POST'])
+@handle_errors
+def validate_paths():
+    """Validate that file paths exist."""
+    data = request.json
+    paths = data.get('paths', {})
+    
+    # Get working directory for resolving relative paths
+    working_dir = paths.get('working_directory', '')
+    
+    # Validate each path
+    validation_results = {
+        key: validate_single_path(key, path, working_dir)
+        for key, path in paths.items()
+    }
+    
+    # Overall validation status
+    all_valid = all(result["valid"] for result in validation_results.values())
+    
+    return success_response({
+        "all_valid": all_valid,
+        "results": validation_results
+    })
+
+
+def run_server(port: int = WEB_PORT, debug: bool = False):
+    """Run the Flask server."""
+    # Apply health check filter to suppress /api/monitor/status logs
+    log = logging.getLogger('werkzeug')
+    log.addFilter(HealthCheckFilter())
+    log.setLevel(logging.WARNING)
+    
+    print(f"""
+╔══════════════════════════════════════════════════════════════╗
+║         Wispr Action Web Server - STARTING                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+Server running at: http://localhost:{port}
+Open this URL in your browser to configure commands
+
+""")
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)
+
+
+if __name__ == '__main__':
+    run_server()
+

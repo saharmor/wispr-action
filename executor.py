@@ -1,0 +1,721 @@
+"""Action execution engine for script and HTTP commands."""
+
+import subprocess
+import json
+import os
+import re
+import requests
+from typing import Dict, Any, Optional, Tuple
+from datetime import datetime
+from command_manager import get_command_manager
+from config import CONFIRM_MODE
+from dotenv import dotenv_values
+
+# ===== Constants =====
+TERMINAL_LAUNCH_TIMEOUT = 10  # Seconds to wait for terminal launch
+RESPONSE_TEXT_LIMIT = 500     # Character limit for HTTP response text
+MONITOR_DELAY = 0.5            # Seconds between terminal monitor checks
+
+
+class ExecutionResult:
+    """Result of command execution."""
+    
+    def __init__(
+        self,
+        success: bool,
+        command_id: str,
+        command_name: str,
+        output: str = "",
+        error: str = "",
+        duration: float = 0.0
+    ):
+        self.success = success
+        self.command_id = command_id
+        self.command_name = command_name
+        self.output = output
+        self.error = error
+        self.duration = duration
+        self.timestamp = datetime.now().isoformat()
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary."""
+        return {
+            "success": self.success,
+            "command_id": self.command_id,
+            "command_name": self.command_name,
+            "output": self.output,
+            "error": self.error,
+            "duration": self.duration,
+            "timestamp": self.timestamp
+        }
+
+
+# ===== Utility Functions =====
+
+def create_result(command: Dict, success: bool, start_time: datetime, 
+                  output: str = "", error: str = "") -> ExecutionResult:
+    """Factory function to create ExecutionResult with calculated duration."""
+    duration = (datetime.now() - start_time).total_seconds()
+    return ExecutionResult(
+        success=success,
+        command_id=command['id'],
+        command_name=command['name'],
+        output=output,
+        error=error,
+        duration=duration
+    )
+
+
+def resolve_path(path: str, working_directory: Optional[str] = None) -> str:
+    """
+    Resolve a path with tilde expansion and relative path handling.
+    
+    Args:
+        path: Path to resolve
+        working_directory: Optional working directory for relative paths
+        
+    Returns:
+        Resolved absolute path
+    """
+    resolved = os.path.expanduser(path)
+    if not os.path.isabs(resolved) and working_directory:
+        resolved = os.path.join(working_directory, resolved)
+    return resolved
+
+
+def load_env_vars(env_file: str) -> Dict[str, str]:
+    """
+    Load environment variables from a .env file.
+    
+    Args:
+        env_file: Path to .env file
+        
+    Returns:
+        Dictionary of environment variables (empty if file not found)
+    """
+    env_file_path = os.path.expanduser(env_file)
+    if os.path.exists(env_file_path):
+        print(f"Loaded environment from: {env_file_path}")
+        return dict(dotenv_values(env_file_path))
+    else:
+        print(f"Warning: Environment file not found: {env_file_path}")
+        return {}
+
+
+def request_confirmation() -> bool:
+    """
+    Request user confirmation for execution.
+    
+    Returns:
+        True if user confirms, False otherwise
+    """
+    response = input("Execute? (y/n): ")
+    return response.lower() == 'y'
+
+
+def escape_for_applescript(text: str, for_double_quotes: bool = False) -> str:
+    """
+    Escape text for use in AppleScript.
+    
+    Args:
+        text: Text to escape
+        for_double_quotes: If True, escape for use inside double quotes
+        
+    Returns:
+        Escaped text
+    """
+    if for_double_quotes:
+        # Escape backslashes first, then double quotes
+        return text.replace('\\', '\\\\').replace('"', '\\"')
+    else:
+        # Escape single quotes for shell
+        return text.replace("'", "'\\''")
+
+
+def build_command_string(script_path: str, python_interpreter: str = "", 
+                        args_str: str = "") -> str:
+    """
+    Build command string with proper quoting.
+    
+    Args:
+        script_path: Path to script
+        python_interpreter: Optional Python interpreter path
+        args_str: Optional argument string
+        
+    Returns:
+        Complete command string
+    """
+    if python_interpreter:
+        base_cmd = f'"{python_interpreter}" "{script_path}"'
+        print(f"Using virtual environment: {python_interpreter}")
+    else:
+        base_cmd = f'"{script_path}"'
+        print(f"Using script directly (no virtualenv specified)")
+    
+    return f"{base_cmd} {args_str}" if args_str else base_cmd
+
+
+def prepare_execution_environment(action: Dict, parameters: Dict, command: Dict) -> Tuple[str, str, str, Dict]:
+    """
+    Prepare all execution parameters (paths, command, environment).
+    
+    Args:
+        action: Action definition from command
+        parameters: Command parameters
+        command: Full command definition
+        
+    Returns:
+        Tuple of (script_path, full_command, cwd, env_dict)
+    """
+    # Get working directory first (needed for resolving relative paths)
+    cwd = action.get('working_directory')
+    if cwd:
+        cwd = os.path.expanduser(cwd)
+        if os.path.exists(cwd):
+            print(f"Working directory: {cwd}")
+        else:
+            print(f"WARNING: Working directory not found: {cwd}")
+            print(f"         Using current directory instead")
+            cwd = None
+    else:
+        print(f"Working directory: {os.getcwd()} (current directory)")
+    
+    # Resolve script path
+    script_path = resolve_path(action['script_path'], cwd)
+    print(f"Resolved script path: {script_path}")
+    
+    # Resolve Python interpreter if specified
+    python_interpreter = action.get('python_interpreter', '')
+    if python_interpreter:
+        python_interpreter = resolve_path(python_interpreter, cwd)
+        print(f"Resolved Python interpreter: {python_interpreter}")
+        
+        # Validate Python interpreter
+        if not os.path.exists(python_interpreter):
+            print(f"WARNING: Python interpreter not found at: {python_interpreter}")
+            print(f"         Command may fail or use system Python instead!")
+        elif not os.access(python_interpreter, os.X_OK):
+            print(f"WARNING: Python interpreter not executable: {python_interpreter}")
+    
+    # Build arguments and command
+    args_template = action.get('args_template', '')
+    args_str = interpolate_parameters(args_template, parameters, command)
+    full_command = build_command_string(script_path, python_interpreter, args_str)
+    
+    print(f"Executing: {full_command}")
+    
+    # Load environment variables
+    env = os.environ.copy()
+    env_file = action.get('env_file', '')
+    if env_file:
+        env_vars = load_env_vars(env_file)
+        env.update(env_vars)
+    
+    return script_path, full_command, cwd, env
+
+
+def generate_terminal_applescript(full_command: str, cwd: Optional[str], 
+                                  env_vars: Dict[str, str]) -> str:
+    """
+    Generate AppleScript to launch command in Terminal.
+    
+    Args:
+        full_command: Complete command to execute
+        cwd: Optional working directory
+        env_vars: Environment variables to export
+        
+    Returns:
+        AppleScript code as string
+    """
+    # Escape command for AppleScript
+    escaped_command = escape_for_applescript(full_command)
+    
+    # Build cd command if working directory is specified
+    cd_command = f"cd '{cwd}' && " if cwd else ""
+    
+    # Build export commands for environment variables
+    env_commands = ""
+    for key, value in env_vars.items():
+        escaped_value = escape_for_applescript(value) if value else ""
+        env_commands += f"export {key}='{escaped_value}'; "
+    
+    # Combine all commands
+    terminal_command = f"{cd_command}{env_commands}{escaped_command}"
+    terminal_command_escaped = escape_for_applescript(terminal_command, for_double_quotes=True)
+    
+    # AppleScript that launches the terminal and returns the window ID
+    return f'''tell application "Terminal"
+    set newTab to do script "{terminal_command_escaped}"
+    set newWindow to first window whose tabs contains newTab
+    return id of newWindow
+end tell'''
+
+
+def generate_monitor_applescript(window_id: str) -> str:
+    """
+    Generate AppleScript to monitor and close terminal window.
+    
+    Args:
+        window_id: Terminal window ID to monitor
+        
+    Returns:
+        AppleScript code as string
+    """
+    return f'''tell application "Terminal"
+    repeat
+        try
+            set targetWindow to window id {window_id}
+            set isWindowBusy to busy of selected tab of targetWindow
+            if not isWindowBusy then
+                delay {MONITOR_DELAY}
+                close targetWindow
+                exit repeat
+            end if
+        on error
+            exit repeat
+        end try
+        delay {MONITOR_DELAY}
+    end repeat
+end tell'''
+
+
+def execute_in_foreground(full_command: str, cwd: Optional[str], action: Dict,
+                         command: Dict, start_time: datetime) -> ExecutionResult:
+    """
+    Execute command in foreground (visible terminal window).
+    
+    Args:
+        full_command: Complete command string
+        cwd: Working directory
+        action: Action definition
+        command: Command definition
+        start_time: Execution start time
+        
+    Returns:
+        ExecutionResult
+    """
+    # Load env vars for AppleScript
+    env_vars = {}
+    env_file = action.get('env_file', '')
+    if env_file:
+        env_vars = load_env_vars(env_file)
+    
+    # Generate AppleScript
+    applescript = generate_terminal_applescript(full_command, cwd, env_vars)
+    
+    print(f"Running in foreground terminal (will auto-close when done)...")
+    
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', applescript],
+            capture_output=True,
+            text=True,
+            timeout=TERMINAL_LAUNCH_TIMEOUT
+        )
+        
+        if result.returncode == 0:
+            # Get the window ID and start monitor
+            window_id = result.stdout.strip()
+            monitor_script = generate_monitor_applescript(window_id)
+            
+            # Run monitor script in background
+            subprocess.Popen(
+                ['osascript', '-e', monitor_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            
+            return create_result(
+                command, True, start_time,
+                output="Command launched in foreground terminal window"
+            )
+        else:
+            return create_result(
+                command, False, start_time,
+                error=f"Failed to open terminal: {result.stderr}"
+            )
+    
+    except subprocess.TimeoutExpired:
+        return create_result(
+            command, False, start_time,
+            error="Terminal launch timed out"
+        )
+    except Exception as e:
+        return create_result(
+            command, False, start_time,
+            error=f"Foreground execution error: {str(e)}"
+        )
+
+
+def execute_in_background(full_command: str, cwd: Optional[str], env: Dict,
+                         command: Dict, start_time: datetime) -> ExecutionResult:
+    """
+    Execute command in background (fire and forget).
+    
+    Args:
+        full_command: Complete command string
+        cwd: Working directory
+        env: Environment variables
+        command: Command definition
+        start_time: Execution start time
+        
+    Returns:
+        ExecutionResult
+    """
+    try:
+        process = subprocess.Popen(
+            full_command,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            cwd=cwd,
+            start_new_session=True  # Detach from parent process
+        )
+        
+        return create_result(
+            command, True, start_time,
+            output=f"Command launched successfully (PID: {process.pid})"
+        )
+    
+    except Exception as e:
+        return create_result(
+            command, False, start_time,
+            error=f"Background execution error: {str(e)}"
+        )
+
+
+def interpolate_parameters(template: str, parameters: Dict[str, Any], command: Optional[Dict] = None) -> str:
+    """
+    Interpolate parameters into a template string.
+    
+    Replaces {param_name} with parameter values. Handles both original and sanitized parameter names.
+    
+    Args:
+        template: Template string with {param} placeholders
+        parameters: Dictionary of parameter values (may use sanitized names)
+        command: Optional command definition to map original names to sanitized names
+        
+    Returns:
+        Interpolated string
+    """
+    result = template
+    
+    # Build mapping from original names to sanitized parameter values
+    param_map = {}
+    if command and 'parameters' in command:
+        from command_manager import CommandManager
+        manager = CommandManager()
+        for param_def in command['parameters']:
+            original_name = param_def['name']
+            sanitized_name = manager._sanitize_param_name(original_name)
+            # Check if we have the value under the sanitized name
+            if sanitized_name in parameters:
+                param_map[original_name] = parameters[sanitized_name]
+            # Also keep the sanitized name mapping
+            param_map[sanitized_name] = parameters.get(sanitized_name)
+    else:
+        # No command provided, use parameters as-is
+        param_map = parameters
+    
+    # Replace placeholders in template
+    for key, value in param_map.items():
+        if value is None:
+            continue
+        placeholder = "{" + key + "}"
+        # Convert value to string appropriately
+        if isinstance(value, (int, float, bool)):
+            str_value = str(value)
+        elif isinstance(value, str):
+            str_value = value
+        else:
+            str_value = json.dumps(value)
+        
+        result = result.replace(placeholder, str_value)
+    
+    return result
+
+
+def execute_script(
+    command: Dict,
+    parameters: Dict[str, Any],
+    confirm_mode: bool = False,
+    timeout: int = 0
+) -> ExecutionResult:
+    """
+    Execute a script-based command.
+    
+    Supports:
+    - Custom Python interpreters (virtualenv)
+    - Environment files (.env)
+    - Working directory
+    - Foreground execution (visible terminal window)
+    - Background execution (fire and forget, returns immediately)
+    
+    Args:
+        command: Command definition
+        parameters: Extracted parameters
+        confirm_mode: Whether to ask for confirmation
+        timeout: Execution timeout in seconds (default: 0 = no timeout, only applies to 
+                 foreground AppleScript launch)
+        
+    Returns:
+        ExecutionResult with success status and PID
+        
+    Note:
+        Scripts are launched asynchronously and return immediately without waiting
+        for completion. This prevents timeout errors for long-running scripts.
+    """
+    start_time = datetime.now()
+    action = command['action']
+    run_foreground = command.get('run_foreground', False)
+    
+    try:
+        # Prepare all execution parameters
+        script_path, full_command, cwd, env = prepare_execution_environment(
+            action, parameters, command
+        )
+        
+        # Request confirmation if needed
+        if confirm_mode and not request_confirmation():
+            return create_result(
+                command, False, start_time,
+                error="Execution cancelled by user"
+            )
+        
+        # Execute based on mode
+        if run_foreground:
+            return execute_in_foreground(full_command, cwd, action, command, start_time)
+        else:
+            return execute_in_background(full_command, cwd, env, command, start_time)
+    
+    except subprocess.TimeoutExpired:
+        return create_result(
+            command, False, start_time,
+            error="Script execution timed out"
+        )
+    except Exception as e:
+        return create_result(
+            command, False, start_time,
+            error=f"Script execution error: {str(e)}"
+        )
+
+
+def prepare_http_request(action: Dict, parameters: Dict, command: Dict) -> Tuple[str, str, Dict, Any]:
+    """
+    Prepare HTTP request parameters.
+    
+    Args:
+        action: Action definition from command
+        parameters: Command parameters
+        command: Full command definition
+        
+    Returns:
+        Tuple of (url, method, headers, body)
+    """
+    # Interpolate URL
+    url = interpolate_parameters(action['url'], parameters, command)
+    method = action.get('method', 'POST').upper()
+    
+    # Build headers
+    headers = {}
+    if 'headers' in action:
+        for header in action['headers']:
+            key = header['key']
+            value = interpolate_parameters(header['value'], parameters, command)
+            headers[key] = value
+    
+    # Build body
+    body = None
+    if 'body_template' in action and action['body_template']:
+        body_template = action['body_template']
+        body_str = interpolate_parameters(body_template, parameters, command)
+        
+        # Try to parse as JSON
+        try:
+            body = json.loads(body_str)
+        except json.JSONDecodeError:
+            # Use as string
+            body = body_str
+    
+    print(f"HTTP {method}: {url}")
+    if body:
+        print(f"Body: {json.dumps(body, indent=2) if isinstance(body, dict) else body}")
+    
+    return url, method, headers, body
+
+
+def make_http_request(method: str, url: str, headers: Dict, body: Any, timeout: int):
+    """
+    Make HTTP request using appropriate method.
+    
+    Args:
+        method: HTTP method
+        url: Request URL
+        headers: Request headers
+        body: Request body (for POST/PUT)
+        timeout: Request timeout (None for no timeout)
+        
+    Returns:
+        Response object
+        
+    Raises:
+        ValueError: If method is unsupported
+    """
+    request_timeout = None if timeout == 0 else timeout
+    
+    # HTTP method dispatch
+    http_methods = {
+        'GET': lambda: requests.get(url, headers=headers, timeout=request_timeout),
+        'POST': lambda: requests.post(url, headers=headers, json=body, timeout=request_timeout),
+        'PUT': lambda: requests.put(url, headers=headers, json=body, timeout=request_timeout),
+        'DELETE': lambda: requests.delete(url, headers=headers, timeout=request_timeout)
+    }
+    
+    if method not in http_methods:
+        raise ValueError(f"Unsupported HTTP method: {method}")
+    
+    return http_methods[method]()
+
+
+def execute_http(
+    command: Dict,
+    parameters: Dict[str, Any],
+    confirm_mode: bool = False,
+    timeout: int = 0
+) -> ExecutionResult:
+    """
+    Execute an HTTP-based command.
+    
+    Args:
+        command: Command definition
+        parameters: Extracted parameters
+        confirm_mode: Whether to ask for confirmation
+        timeout: HTTP request timeout in seconds (default: 0 = no timeout)
+        
+    Returns:
+        ExecutionResult
+    """
+    start_time = datetime.now()
+    action = command['action']
+    
+    try:
+        # Prepare request
+        url, method, headers, body = prepare_http_request(action, parameters, command)
+        
+        # Request confirmation if needed
+        if confirm_mode and not request_confirmation():
+            return create_result(
+                command, False, start_time,
+                error="Execution cancelled by user"
+            )
+        
+        # Make request
+        response = make_http_request(method, url, headers, body, timeout)
+        
+        # Check response
+        if response.status_code < 400:
+            return create_result(
+                command, True, start_time,
+                output=f"Status: {response.status_code}\n{response.text[:RESPONSE_TEXT_LIMIT]}"
+            )
+        else:
+            return create_result(
+                command, False, start_time,
+                output=response.text[:RESPONSE_TEXT_LIMIT],
+                error=f"HTTP error: {response.status_code}"
+            )
+    
+    except requests.Timeout:
+        return create_result(
+            command, False, start_time,
+            error="HTTP request timed out"
+        )
+    except Exception as e:
+        return create_result(
+            command, False, start_time,
+            error=f"HTTP request error: {str(e)}"
+        )
+
+
+def execute(
+    command_id: str,
+    parameters: Dict[str, Any],
+    confirm_mode: Optional[bool] = None,
+    timeout: Optional[int] = None
+) -> ExecutionResult:
+    """
+    Execute a command with the given parameters.
+    
+    Args:
+        command_id: ID of the command to execute
+        parameters: Extracted parameters
+        confirm_mode: Override global CONFIRM_MODE if provided
+        timeout: Execution timeout in seconds (default: 0 = no timeout)
+        
+    Returns:
+        ExecutionResult
+    """
+    # Use global CONFIRM_MODE if not specified
+    if confirm_mode is None:
+        confirm_mode = CONFIRM_MODE
+    
+    # Get command
+    manager = get_command_manager()
+    command = manager.get_command(command_id)
+    
+    if not command:
+        return ExecutionResult(
+            success=False,
+            command_id=command_id,
+            command_name="Unknown",
+            error=f"Command not found: {command_id}"
+        )
+    
+    # Check if command is enabled
+    if not command.get('enabled', True):
+        return ExecutionResult(
+            success=False,
+            command_id=command_id,
+            command_name=command['name'],
+            error="Command is disabled"
+        )
+    
+    # Execute based on action type
+    action_type = command['action']['type']
+    
+    if action_type == 'script':
+        # Use provided timeout or default to 0 (no timeout) for scripts
+        script_timeout = timeout if timeout is not None else 0
+        return execute_script(command, parameters, confirm_mode, script_timeout)
+    elif action_type == 'http':
+        # Use provided timeout or default to 0 (no timeout) for HTTP
+        http_timeout = timeout if timeout is not None else 0
+        return execute_http(command, parameters, confirm_mode, http_timeout)
+    else:
+        return ExecutionResult(
+            success=False,
+            command_id=command_id,
+            command_name=command['name'],
+            error=f"Unknown action type: {action_type}"
+        )
+
+
+def log_execution(result: ExecutionResult, log_file: Optional[str] = None) -> None:
+    """
+    Log execution result to file.
+    
+    Args:
+        result: ExecutionResult to log
+        log_file: Optional log file path
+    """
+    if log_file:
+        try:
+            with open(log_file, 'a') as f:
+                f.write(json.dumps(result.to_dict()) + "\n")
+        except IOError as e:
+            print(f"Warning: Could not write to log file: {e}")
+
