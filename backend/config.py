@@ -28,11 +28,11 @@ WEB_PORT = int(os.getenv("WEB_PORT", "9000"))
 # Confirmation mode for testing
 CONFIRM_MODE = os.getenv("CONFIRM_MODE", "false").lower() == "true"
 
-# Commands storage file
-COMMANDS_FILE = os.path.join(os.path.dirname(__file__), "commands.json")
+# Commands storage file (in project root)
+COMMANDS_FILE = os.path.join(os.path.dirname(__file__), "..", "commands.json")
 
-# Logs directory
-LOGS_DIR = os.path.join(os.path.dirname(__file__), "logs")
+# Logs directory (in project root)
+LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 def validate_config():

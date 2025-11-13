@@ -62,14 +62,16 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Run test setup
-echo ""
-echo "🧪 Running setup tests..."
-python test_setup.py
-if [ $? -ne 0 ]; then
+# Run test setup (if test_setup.py exists)
+if [ -f "backend/test_setup.py" ]; then
     echo ""
-    echo "⚠️  Some tests failed. Please fix the issues above before starting."
-    exit 1
+    echo "🧪 Running setup tests..."
+    python backend/test_setup.py
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "⚠️  Some tests failed. Please fix the issues above before starting."
+        exit 1
+    fi
 fi
 
 # Ask if user wants to start now
@@ -81,11 +83,11 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
     echo "🎉 Starting Wispr Action..."
     echo ""
-    python main.py
+    python backend/main.py
 else
     echo ""
     echo "✅ Setup complete! To start later, run:"
     echo "   source venv/bin/activate"
-    echo "   python main.py"
+    echo "   python backend/main.py"
 fi
 

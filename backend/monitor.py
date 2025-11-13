@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional, Dict, Set
 import threading
 
-from config import WISPR_DB_PATH, ACTIVATION_WORD, POLL_INTERVAL, WEB_PORT
+from config import WISPR_DB_PATH, ACTIVATION_WORD, POLL_INTERVAL, WEB_PORT, LOGS_DIR
 from parser import parse_command
 from executor import execute, log_execution, ExecutionResult
 from command_manager import get_command_manager
@@ -159,7 +159,7 @@ class WisprMonitor:
         print(f"\n{'='*60}\n")
         
         # Log execution
-        log_execution(result, os.path.join(os.path.dirname(__file__), 'logs', 'executions.log'))
+        log_execution(result, os.path.join(LOGS_DIR, 'executions.log'))
         
         return result
     

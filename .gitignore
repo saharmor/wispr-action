@@ -31,3 +31,5 @@ commands.json
 
 # macOS
 .DS_Store
+execution_history.db
+execution_history.db

@@ -15,9 +15,10 @@ from parser import parse_command
 from executor import execute
 from monitor import get_monitor
 from config import WEB_PORT
+from execution_history import add_execution_log, get_execution_logs, get_execution_count
 
 
-app = Flask(__name__, static_folder='web', static_url_path='')
+app = Flask(__name__, static_folder='../web', static_url_path='')
 CORS(app)
 
 # ===== Performance & Compression =====
@@ -29,15 +30,11 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 60 * 60 * 24 * 30  # 30 days
 Compress(app)
 
 # ===== Constants =====
-MAX_LOGS = 50
 HTTP_OK = 200
 HTTP_CREATED = 201
 HTTP_BAD_REQUEST = 400
 HTTP_NOT_FOUND = 404
 HTTP_INTERNAL_ERROR = 500
-
-# Store recent execution logs in memory
-execution_logs = []
 
 
 # ===== Response Utilities =====
@@ -130,7 +127,7 @@ def add_security_and_cache_headers(response):
 @app.route('/')
 def index():
     """Serve the main UI."""
-    return send_from_directory('web', 'index.html')
+    return send_from_directory('../web', 'index.html')
 
 
 @app.route('/api/commands', methods=['GET'])
@@ -235,16 +232,14 @@ def execute_command():
     # Execute the command
     result = execute(command_id, parameters, confirm_mode=False, timeout=timeout)
     
-    # Add to logs
+    # Add to database
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "command_id": command_id,
         "parameters": parameters,
         "result": result.to_dict()
     }
-    execution_logs.insert(0, log_entry)
-    if len(execution_logs) > MAX_LOGS:
-        execution_logs.pop()
+    add_execution_log(log_entry)
     
     return success_response({"result": result.to_dict()})
 
@@ -287,9 +282,18 @@ def monitor_stop():
 @app.route('/api/logs', methods=['GET'])
 @handle_errors
 def get_logs():
-    """Get recent execution logs."""
+    """Get recent execution logs from database."""
     limit = request.args.get('limit', 20, type=int)
-    return success_response({"logs": execution_logs[:limit]})
+    offset = request.args.get('offset', 0, type=int)
+    
+    logs = get_execution_logs(limit=limit, offset=offset)
+    total_count = get_execution_count()
+    
+    return success_response({
+        "logs": logs,
+        "total": total_count,
+        "has_more": (offset + len(logs)) < total_count
+    })
 
 
 # ===== Path Validation Utilities =====

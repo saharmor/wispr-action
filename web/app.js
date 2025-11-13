@@ -4,7 +4,10 @@ const state = {
     currentCommand: null,
     isEditing: false,
     monitorStatus: null,
-    lastParseResult: null
+    lastParseResult: null,
+    currentView: 'commands', // 'commands' or 'history'
+    executionHistory: [],
+    historyOffset: 0
 };
 
 // API Base URL
@@ -1437,5 +1440,169 @@ function hideToast(toastElement) {
             toastElement.parentElement.removeChild(toastElement);
         }
     }, 300); // Match animation duration
+}
+
+// ===== History View Functions =====
+
+/**
+ * Format ISO timestamp to human-readable format: "Nov 12, 2025 3:45 PM"
+ */
+function formatTimestamp(isoString) {
+    const date = new Date(isoString);
+    const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    };
+    return date.toLocaleString('en-US', options);
+}
+
+/**
+ * Load execution history from the server
+ */
+async function loadExecutionHistory(limit = 20) {
+    try {
+        const data = await apiCall(`/api/logs?limit=${limit}`);
+        state.executionHistory = data.logs || [];
+        state.historyOffset = state.executionHistory.length;
+        renderHistoryView();
+    } catch (error) {
+        console.error('Failed to load execution history:', error);
+        showToast('Failed to load history', 'error');
+    }
+}
+
+/**
+ * Load more history entries (pagination)
+ */
+async function loadMoreHistory() {
+    try {
+        const data = await apiCall(`/api/logs?limit=20&offset=${state.historyOffset}`);
+        const newLogs = data.logs || [];
+        
+        if (newLogs.length === 0) {
+            showToast('No more history to load', 'info', 2000);
+            return;
+        }
+        
+        state.executionHistory = state.executionHistory.concat(newLogs);
+        state.historyOffset = state.executionHistory.length;
+        
+        // Hide load more button if no more logs
+        if (!data.has_more) {
+            document.getElementById('loadMoreHistoryBtn').style.display = 'none';
+        }
+        
+        renderHistoryView();
+        showToast(`Loaded ${newLogs.length} more entries`, 'info', 2000);
+    } catch (error) {
+        console.error('Failed to load more history:', error);
+        showToast('Failed to load more history', 'error');
+    }
+}
+
+/**
+ * Switch between commands and history views
+ */
+function switchView(viewName) {
+    state.currentView = viewName;
+    
+    const commandSection = document.getElementById('commandListSection');
+    const historySection = document.getElementById('historySection');
+    const commandsTab = document.getElementById('commandsTab');
+    const historyTab = document.getElementById('historyTab');
+    
+    if (viewName === 'commands') {
+        commandSection.style.display = 'block';
+        historySection.style.display = 'none';
+        commandsTab.classList.add('active');
+        historyTab.classList.remove('active');
+    } else {
+        commandSection.style.display = 'none';
+        historySection.style.display = 'block';
+        commandsTab.classList.remove('active');
+        historyTab.classList.add('active');
+        
+        // Load history when switching to history view
+        loadExecutionHistory();
+    }
+}
+
+/**
+ * Render the history view with execution logs
+ */
+function renderHistoryView() {
+    const historyBody = document.getElementById('historyTableBody');
+    const emptyState = document.getElementById('historyEmptyState');
+    const tableContainer = document.getElementById('historyTableContainer');
+    const loadMoreBtn = document.getElementById('loadMoreHistoryBtn');
+    
+    if (state.executionHistory.length === 0) {
+        emptyState.style.display = 'block';
+        tableContainer.style.display = 'none';
+        loadMoreBtn.style.display = 'none';
+        return;
+    }
+    
+    emptyState.style.display = 'none';
+    tableContainer.style.display = 'block';
+    loadMoreBtn.style.display = 'block';
+    
+    historyBody.innerHTML = state.executionHistory.map(log => {
+        const result = log.result;
+        const timestamp = formatTimestamp(log.timestamp);
+        const commandName = escapeHtml(result.command_name);
+        const duration = result.duration ? result.duration.toFixed(2) : '0.00';
+        
+        // Format parameters
+        let paramsHtml = '';
+        if (log.parameters && Object.keys(log.parameters).length > 0) {
+            paramsHtml = Object.entries(log.parameters)
+                .map(([key, value]) => `<div class="param-item-small"><span class="param-key-small">${escapeHtml(key)}:</span> <span class="param-value-small">${escapeHtml(String(value))}</span></div>`)
+                .join('');
+        } else {
+            paramsHtml = '<span class="text-muted">No parameters</span>';
+        }
+        
+        // Status badge
+        const statusClass = result.success ? 'status-success' : 'status-error';
+        const statusText = result.success ? 'Success' : 'Failed';
+        
+        // Output or error
+        let outputHtml = '';
+        if (result.success && result.output) {
+            outputHtml = `<pre class="output-block">${escapeHtml(result.output)}</pre>`;
+        } else if (!result.success && result.error) {
+            outputHtml = `<pre class="output-block error-output">${escapeHtml(result.error)}</pre>`;
+        } else {
+            outputHtml = '<span class="text-muted">No output</span>';
+        }
+        
+        return `
+            <tr>
+                <td>
+                    <div class="timestamp">${timestamp}</div>
+                </td>
+                <td>
+                    <div class="command-name-small">${commandName}</div>
+                </td>
+                <td>
+                    <div class="params-display">${paramsHtml}</div>
+                </td>
+                <td>
+                    <span class="status-badge ${statusClass}">${statusText}</span>
+                </td>
+                <td>
+                    ${outputHtml}
+                </td>
+                <td>
+                    <span class="duration">${duration}s</span>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 

@@ -41,9 +41,12 @@
         <!-- Main Content -->
         <main class="main-content">
             <!-- Command List -->
-            <section class="command-list-section">
+            <section class="command-list-section" id="commandListSection">
                 <div class="section-header">
-                    <h2>Commands</h2>
+                    <div class="view-tabs">
+                        <button class="view-tab active" id="commandsTab" onclick="switchView('commands')">Commands</button>
+                        <button class="view-tab" id="historyTab" onclick="switchView('history')">History</button>
+                    </div>
                     <span class="command-count" id="commandCount">0 commands</span>
                 </div>
                 
@@ -68,6 +71,42 @@
                         <tbody id="commandTableBody">
                         </tbody>
                     </table>
+                </div>
+            </section>
+
+            <!-- History Section -->
+            <section class="command-list-section" id="historySection" style="display: none;">
+                <div class="section-header">
+                    <div class="view-tabs">
+                        <button class="view-tab" id="commandsTab2" onclick="switchView('commands')">Commands</button>
+                        <button class="view-tab active" id="historyTab2" onclick="switchView('history')">History</button>
+                    </div>
+                </div>
+
+                <div class="empty-state" id="historyEmptyState">
+                    <div class="empty-icon">📋</div>
+                    <h3>No command history yet</h3>
+                    <p>Execute a command to see it here</p>
+                </div>
+
+                <div class="history-table-container" id="historyTableContainer" style="display: none;">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Command</th>
+                                <th>Parameters</th>
+                                <th>Status</th>
+                                <th>Output</th>
+                                <th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                        </tbody>
+                    </table>
+                    <div class="load-more-container">
+                        <button id="loadMoreHistoryBtn" class="btn btn-secondary" onclick="loadMoreHistory()">Load More</button>
+                    </div>
                 </div>
             </section>
 
