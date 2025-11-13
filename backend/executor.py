@@ -10,6 +10,7 @@ from datetime import datetime
 from command_manager import get_command_manager
 from config import CONFIRM_MODE
 from dotenv import dotenv_values
+from typing import Optional as TypingOptional, Dict as TypingDict
 
 # ===== Constants =====
 TERMINAL_LAUNCH_TIMEOUT = 10  # Seconds to wait for terminal launch
@@ -27,7 +28,8 @@ class ExecutionResult:
         command_name: str,
         output: str = "",
         error: str = "",
-        duration: float = 0.0
+        duration: float = 0.0,
+        meta: TypingOptional[TypingDict[str, Any]] = None
     ):
         self.success = success
         self.command_id = command_id
@@ -36,6 +38,7 @@ class ExecutionResult:
         self.error = error
         self.duration = duration
         self.timestamp = datetime.now().isoformat()
+        self.meta = meta or {}
     
     def to_dict(self) -> Dict:
         """Convert to dictionary."""
@@ -46,14 +49,16 @@ class ExecutionResult:
             "output": self.output,
             "error": self.error,
             "duration": self.duration,
-            "timestamp": self.timestamp
+            "timestamp": self.timestamp,
+            "meta": self.meta
         }
 
 
 # ===== Utility Functions =====
 
 def create_result(command: Dict, success: bool, start_time: datetime, 
-                  output: str = "", error: str = "") -> ExecutionResult:
+                  output: str = "", error: str = "", 
+                  meta: TypingOptional[TypingDict[str, Any]] = None) -> ExecutionResult:
     """Factory function to create ExecutionResult with calculated duration."""
     duration = (datetime.now() - start_time).total_seconds()
     return ExecutionResult(
@@ -62,7 +67,8 @@ def create_result(command: Dict, success: bool, start_time: datetime,
         command_name=command['name'],
         output=output,
         error=error,
-        duration=duration
+        duration=duration,
+        meta=meta
     )
 
 
@@ -326,7 +332,8 @@ def execute_in_foreground(full_command: str, cwd: Optional[str], env_vars: Dict,
             
             return create_result(
                 command, True, start_time,
-                output="Command launched in foreground terminal window"
+                output="Command launched in foreground terminal window",
+                meta={"terminal_window_id": window_id, "mode": "foreground"}
             )
         else:
             return create_result(
@@ -375,7 +382,8 @@ def execute_in_background(full_command: str, cwd: Optional[str], env: Dict,
         
         return create_result(
             command, True, start_time,
-            output=f"Command launched successfully (PID: {process.pid})"
+            output=f"Command launched successfully (PID: {process.pid})",
+            meta={"pid": process.pid, "mode": "background"}
         )
     
     except Exception as e:

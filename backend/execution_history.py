@@ -130,13 +130,14 @@ def start_execution_log(command_id: str, command_name: str, parameters: Dict) ->
         return cursor.lastrowid
 
 
-def update_execution_log(log_id: int, result: Dict) -> bool:
+def update_execution_log(log_id: int, result: Dict, keep_running: bool = False) -> bool:
     """
     Update an execution log with the final result.
     
     Args:
         log_id: ID of the log entry to update
         result: ExecutionResult dict with success, output, error, duration
+        keep_running: If True, keep status as 'running' (for async commands)
     
     Returns:
         True if updated successfully
@@ -144,7 +145,10 @@ def update_execution_log(log_id: int, result: Dict) -> bool:
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        status = 'completed' if result.get('success') else 'failed'
+        if keep_running:
+            status = 'running'
+        else:
+            status = 'completed' if result.get('success') else 'failed'
         
         cursor.execute("""
             UPDATE execution_history 
@@ -218,6 +222,46 @@ def get_execution_logs(limit: int = 20, offset: int = 0) -> List[Dict]:
             })
         
         return logs
+
+
+def get_execution_log_by_id(log_id: int) -> Optional[Dict]:
+    """Get a single execution log by ID."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                id,
+                timestamp,
+                command_id,
+                command_name,
+                parameters,
+                status,
+                success,
+                output,
+                error,
+                duration
+            FROM execution_history
+            WHERE id = ?
+        """, (log_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            'id': row['id'],
+            'timestamp': row['timestamp'],
+            'command_id': row['command_id'],
+            'parameters': json.loads(row['parameters']) if row['parameters'] else {},
+            'result': {
+                'command_id': row['command_id'],
+                'command_name': row['command_name'],
+                'status': row['status'],
+                'success': bool(row['success']) if row['success'] is not None else None,
+                'output': row['output'] or '',
+                'error': row['error'] or '',
+                'duration': row['duration'] or 0.0,
+                'timestamp': row['timestamp']
+            }
+        }
 
 
 def get_execution_count() -> int:

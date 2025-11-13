@@ -16,6 +16,7 @@ from executor import execute
 from monitor import get_monitor
 from config import WEB_PORT
 from execution_history import add_execution_log, get_execution_logs, get_execution_count, start_execution_log, update_execution_log
+from execution_watcher import start_script_completion_watcher
 
 
 app = Flask(__name__, static_folder='../web', static_url_path='')
@@ -229,7 +230,7 @@ def execute_command():
     if not command_id:
         return error_response("No command_id provided", HTTP_BAD_REQUEST)
     
-    # Get command name before execution
+    # Get command details before execution
     manager = get_command_manager()
     command = manager.get_command(command_id)
     command_name = command['name'] if command else 'Unknown Command'
@@ -240,8 +241,21 @@ def execute_command():
     # Execute the command
     result = execute(command_id, parameters, confirm_mode=False, timeout=timeout)
     
-    # Update the log entry with the result
-    update_execution_log(log_id, result.to_dict())
+    # Check if this is an async command (background or foreground script)
+    # These return immediately after launching, so we keep them as "running"
+    is_async_script = False
+    if command and command.get('action', {}).get('type') == 'script':
+        # Background scripts or foreground scripts are async
+        is_async_script = True  # All scripts are async (background or foreground)
+    
+    # Update the log entry
+    # For async scripts, keep status as "running" since we don't know when they finish
+    # For sync commands (HTTP), mark as completed/failed
+    update_execution_log(log_id, result.to_dict(), keep_running=is_async_script)
+    
+    # If async script, start a watcher to finalize on completion and set accurate duration
+    if is_async_script:
+        start_script_completion_watcher(log_id, result.to_dict())
     
     return success_response({"result": result.to_dict(), "log_id": log_id})
 

@@ -13,6 +13,7 @@ from parser import parse_command
 from executor import execute, log_execution, ExecutionResult
 from command_manager import get_command_manager
 from execution_history import start_execution_log, update_execution_log
+from execution_watcher import start_script_completion_watcher
 
 
 class WisprMonitor:
@@ -156,7 +157,11 @@ class WisprMonitor:
         )
         
         # Update the log entry with the result
-        update_execution_log(log_id, result.to_dict())
+        # Keep scripts marked as 'running' since they are launched asynchronously
+        is_async_script = bool(command and command.get('action', {}).get('type') == 'script')
+        update_execution_log(log_id, result.to_dict(), keep_running=is_async_script)
+        if is_async_script:
+            start_script_completion_watcher(log_id, result.to_dict())
         
         # Display result
         if result.success:

@@ -9,6 +9,7 @@ from parser import parse_command
 from config import CONFIRM_MODE, WISPR_DB_PATH
 from executor import execute
 from execution_history import start_execution_log, update_execution_log
+from execution_watcher import start_script_completion_watcher
 
 def get_db_connection():
     """Get a connection to the Wispr Flow database.
@@ -185,7 +186,9 @@ def process_command(text, personalization_style=None):
     )
     
     # Update the log entry with the result
-    update_execution_log(log_id, exec_result.to_dict())
+    # Keep scripts marked as 'running' since they are launched asynchronously
+    is_async_script = bool(command and command.get('action', {}).get('type') == 'script')
+    update_execution_log(log_id, exec_result.to_dict(), keep_running=is_async_script)
     
     # Show execution result
     if exec_result.success:
@@ -193,7 +196,15 @@ def process_command(text, personalization_style=None):
     else:
         print(f"❌ Execution failed: {exec_result.error}")
     
-    print(f"📝 Updated history log entry (status: {'completed' if exec_result.success else 'failed'})")
+    # Log status message according to async nature
+    if is_async_script:
+        print(f"📝 Updated history log entry (status: running)")
+    else:
+        print(f"📝 Updated history log entry (status: {'completed' if exec_result.success else 'failed'})")
+    
+    # Start watcher for async scripts to finalize and set accurate duration
+    if is_async_script:
+        start_script_completion_watcher(log_id, exec_result.to_dict())
     print(f"\n{'='*60}\n")
     return True
 
