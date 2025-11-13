@@ -4,6 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wispr Action - Voice Command Manager</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="shortcut icon" href="favicon.ico">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,8 +20,13 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1>🎙️ Wispr Action</h1>
-                <p class="subtitle">Voice Command Manager</p>
+                <div class="header-title-wrapper">
+                    <img src="logo.png" alt="Wispr Logo" class="header-logo">
+                    <div class="header-text">
+                        <h1>Wispr Action</h1>
+                        <p class="subtitle">Voice Command Manager</p>
+                    </div>
+                </div>
             </div>
             <div class="header-actions">
                 <div class="monitor-status">
@@ -34,7 +48,7 @@
                 </div>
                 
                 <div class="empty-state" id="emptyState">
-                    <div class="empty-icon">📋</div>
+                    <div class="empty-icon"></div>
                     <h3>No commands yet</h3>
                     <p>Create your first voice command to get started</p>
                     <button class="btn btn-primary" onclick="showCommandEditor()">Create Command</button>
@@ -46,8 +60,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>Description</th>
-                                <th>Parameters</th>
-                                <th>Action</th>
+                                <th>Examples</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -60,7 +73,7 @@
 
             <!-- Test Panel -->
             <section class="test-panel">
-                <h3>🧪 Test Command</h3>
+                <h3>Test Command</h3>
                 <div class="test-input-group">
                     <textarea 
                         id="testPhrase" 
@@ -91,7 +104,7 @@
             <div class="editor-content">
                 <!-- Section 1: Basics -->
                 <section class="editor-section">
-                    <h3>📝 Basics</h3>
+                    <h3>General</h3>
                     <div class="form-group">
                         <label for="cmdName">Command Name *</label>
                         <input type="text" id="cmdName" placeholder="e.g., Process Emails" required>
@@ -100,24 +113,24 @@
                         <label for="cmdDescription">Description *</label>
                         <textarea id="cmdDescription" rows="2" placeholder="What does this command do?" required></textarea>
                     </div>
+                    <div class="form-group">
+                        <label for="cmdTimeout">Timeout (seconds)</label>
+                        <input type="number" id="cmdTimeout" min="0" max="600" placeholder="0">
+                        <small class="help-text">Maximum execution time. Default: 0 (no timeout).</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="cmdRunForeground">
+                            <span>Run in foreground?</span>
+                        </label>
+                        <small class="help-text">Opens a visible terminal window for script execution (useful for debugging)</small>
+                    </div>
                 </section>
 
-                <!-- Section 2: Examples -->
-                <section class="editor-section">
-                    <h3>💡 Example Phrases (Optional)</h3>
-                    <p class="help-text">Provide 2-5 example phrases to help the AI understand your command</p>
-                    <div id="examplesContainer">
-                        <div class="example-row">
-                            <input type="text" class="example-input" placeholder="e.g., 'run emails for sahar@gmail.com'">
-                            <button class="btn-icon" onclick="removeExample(this)">−</button>
-                        </div>
-                    </div>
-                    <button class="btn btn-sm" onclick="addExample()">+ Add Example</button>
-                </section>
 
                 <!-- Section 3: Parameters -->
                 <section class="editor-section">
-                    <h3>🔧 Parameters</h3>
+                    <h3>Parameters</h3>
                     <div class="params-table-container">
                         <table class="params-table">
                             <thead>
@@ -131,7 +144,7 @@
                             </thead>
                             <tbody id="paramsTableBody">
                                 <tr class="param-row">
-                                    <td><input type="text" class="param-name" placeholder="email"></td>
+                                    <td><input type="text" class="param-name" placeholder="e.g. email, location, etc." oninput="updateArgsTemplatePlaceholder()"></td>
                                     <td>
                                         <select class="param-type">
                                             <option value="string">string</option>
@@ -151,9 +164,22 @@
                     <button class="btn btn-sm" onclick="addParam()">+ Add Parameter</button>
                 </section>
 
+                <!-- Section Examples -->
+                <section class="editor-section">
+                    <h3>Example Phrases (Optional)</h3>
+                    <p class="help-text">Provide 2-5 example phrases to help the AI understand your command</p>
+                    <div id="examplesContainer">
+                        <div class="example-row">
+                            <input type="text" class="example-input" placeholder="e.g., 'run emails for sahar@gmail.com'">
+                            <button class="btn-icon" onclick="removeExample(this)">−</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm" onclick="addExample()">+ Add Example</button>
+                </section>
+
                 <!-- Section 4: Action -->
                 <section class="editor-section">
-                    <h3>⚡ Action</h3>
+                    <h3>Action</h3>
                     <div class="action-type-selector">
                         <label class="radio-label">
                             <input type="radio" name="actionType" value="script" checked onchange="toggleActionType()">
@@ -170,11 +196,42 @@
                         <div class="form-group">
                             <label for="scriptPath">Script Path *</label>
                             <input type="text" id="scriptPath" placeholder="~/scripts/process_emails.py">
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="showLaunchJsonImporter()" style="margin-top: 8px;">
+                                📋 Import from launch.json
+                            </button>
                         </div>
                         <div class="form-group">
                             <label for="argsTemplate">Arguments Template</label>
-                            <input type="text" id="argsTemplate" placeholder="--email={email} --days={days}">
-                            <small class="help-text" id="scriptHelpText">Use {param_name} for parameters</small>
+                            <input type="text" id="argsTemplate" placeholder="Define parameters above to see examples">
+                            <small class="help-text" id="scriptHelpText">Required if you define parameters above. Use <code>{param_name}</code> to reference your parameters. Examples: <code>--email={email}</code> or <code>{email}</code> for positional args</small>
+                        </div>
+                        
+                        <!-- Python-specific options (collapsible) -->
+                        <div class="collapsible-section">
+                            <button type="button" class="collapsible-toggle" onclick="togglePythonOptions(event)">
+                                <span class="toggle-icon">▶</span>
+                                Python Environment (Optional)
+                            </button>
+                            <div class="collapsible-content" id="pythonOptions">
+                                <div class="form-group">
+                                    <label for="workingDirectory">Working Directory</label>
+                                    <div class="input-with-button">
+                                        <input type="text" id="workingDirectory" placeholder="~/project">
+                                        <button type="button" class="btn-icon-secondary" onclick="pickDirectory('workingDirectory')" title="Browse for directory">📁</button>
+                                    </div>
+                                    <small class="help-text">Directory to run the script from</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="pythonInterpreter">Python Interpreter</label>
+                                    <input type="text" id="pythonInterpreter" placeholder="venv/bin/python or ~/project/venv/bin/python">
+                                    <small class="help-text">Path to Python interpreter (absolute, relative to working directory, or using ~). Leave empty to use script's shebang.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="envFile">Environment File</label>
+                                    <input type="text" id="envFile" placeholder="~/project/.env">
+                                    <small class="help-text">Path to .env file to load environment variables from</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -216,6 +273,51 @@
             <div class="editor-footer">
                 <button class="btn btn-secondary" onclick="closeCommandEditor()">Cancel</button>
                 <button class="btn btn-primary" id="saveCommandBtn" onclick="saveCommand()">Save Command</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Component -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-container">
+            <div class="modal-header">
+                <div class="modal-icon" id="modalIcon"></div>
+                <h3 class="modal-title" id="modalTitle"></h3>
+                <button class="modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-message" id="modalMessage"></p>
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Launch.json Importer Modal -->
+    <div class="modal-overlay" id="launchJsonModal">
+        <div class="modal-container" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3 class="modal-title">Import from launch.json</h3>
+                <button class="modal-close" onclick="closeLaunchJsonImporter()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-medium); margin-bottom: 16px;">
+                    Paste a launch.json configuration entry below and we'll automatically fill in the fields:
+                </p>
+                <textarea 
+                    id="launchJsonInput" 
+                    placeholder='{\n  "name": "My Script",\n  "program": "${workspaceFolder}/path/to/script.py",\n  "python": "${workspaceFolder}/venv/bin/python",\n  "envFile": "${workspaceFolder}/.env",\n  "args": ["arg1", "arg2"]\n}'
+                    rows="12"
+                    style="width: 100%; font-family: 'Monaco', 'Courier New', monospace; font-size: 13px; padding: 12px; border: 1px solid var(--border-medium); border-radius: var(--radius-sm);"
+                ></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeLaunchJsonImporter()">Cancel</button>
+                <button class="btn btn-primary" onclick="importLaunchJson()">Import</button>
             </div>
         </div>
     </div>
