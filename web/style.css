@@ -595,6 +595,25 @@ h1 {
     to { transform: translateX(0); }
 }
 
+/* Smooth closing animations for the editor overlay and panel */
+.editor-overlay.closing {
+    animation: fadeOut 0.3s forwards;
+}
+
+.editor-overlay.closing .editor-panel {
+    animation: slideOut 0.3s forwards;
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+@keyframes slideOut {
+    from { transform: translateX(0); }
+    to { transform: translateX(100%); }
+}
+
 .editor-header {
     padding: var(--space-lg);
     border-bottom: 1px solid var(--border-light);

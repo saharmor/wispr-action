@@ -27,6 +27,16 @@ function setupEventListeners() {
     document.getElementById('testParseBtn').addEventListener('click', testParse);
     document.getElementById('testExecuteBtn').addEventListener('click', testExecute);
     
+    // Close the editor when clicking outside the pane (on the overlay)
+    const editorOverlay = document.getElementById('editorOverlay');
+    if (editorOverlay) {
+        editorOverlay.addEventListener('click', (event) => {
+            if (event.target === editorOverlay) {
+                closeCommandEditor();
+            }
+        });
+    }
+    
     // Add input listeners to clear validation errors when user starts typing
     Object.values(PATH_FIELD_MAP).forEach(fieldId => {
         const field = document.getElementById(fieldId);
@@ -157,14 +167,24 @@ function showCommandEditor(commandId = null) {
         resetEditor();
     }
     
+    // Ensure closing class is removed before opening
+    overlay.classList.remove('closing');
     overlay.classList.add('active');
 }
 
 // Close Command Editor
 function closeCommandEditor() {
     const overlay = document.getElementById('editorOverlay');
-    overlay.classList.remove('active');
-    resetEditor();
+    if (!overlay) return;
+    
+    // Trigger smooth closing animation (CSS handles animations)
+    overlay.classList.add('closing');
+    
+    // After animation completes, hide and cleanup
+    setTimeout(() => {
+        overlay.classList.remove('active', 'closing');
+        resetEditor();
+    }, 300); // Match CSS animation duration
 }
 
 // Reset Editor
@@ -889,6 +909,122 @@ function closeLaunchJsonImporter() {
     modal.classList.remove('active');
 }
 
+// ---- JSONC Utilities for launch.json parsing (tolerate comments/trailing commas) ----
+function stripJsonCommentsAndTrailingCommas(text) {
+    // Strip comments while preserving string contents
+    let result = '';
+    let inString = false;
+    let stringChar = '';
+    let escapeNext = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const next = i + 1 < text.length ? text[i + 1] : '';
+        
+        if (inLineComment) {
+            if (char === '\n' || char === '\r') {
+                inLineComment = false;
+                result += char;
+            }
+            continue;
+        }
+        
+        if (inBlockComment) {
+            if (char === '*' && next === '/') {
+                inBlockComment = false;
+                i++; // skip '/'
+            }
+            continue;
+        }
+        
+        if (inString) {
+            result += char;
+            if (escapeNext) {
+                escapeNext = false;
+            } else if (char === '\\') {
+                escapeNext = true;
+            } else if (char === stringChar) {
+                inString = false;
+                stringChar = '';
+            }
+            continue;
+        }
+        
+        // Not in string/comment
+        if (char === '"' || char === "'") {
+            inString = true;
+            stringChar = char;
+            result += char;
+            continue;
+        }
+        
+        if (char === '/' && next === '/') {
+            inLineComment = true;
+            i++; // skip next '/'
+            continue;
+        }
+        
+        if (char === '/' && next === '*') {
+            inBlockComment = true;
+            i++; // skip next '*'
+            continue;
+        }
+        
+        result += char;
+    }
+    
+    // Remove trailing commas in objects/arrays: replace ", }" or ", ]" -> " }" / " ]"
+    result = result.replace(/,\s*(?=[}\]])/g, '');
+    // Remove trailing comma at end of input
+    result = result.replace(/,(\s*)$/g, '$1');
+    
+    return result;
+}
+
+function tryParseLaunchJson(text) {
+    // First attempt: strict JSON
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        // Continue to relaxed parsing
+    }
+    
+    // Second attempt: strip comments and trailing commas
+    const cleaned = stripJsonCommentsAndTrailingCommas(text);
+    try {
+        return JSON.parse(cleaned);
+    } catch (e) {
+        // Continue to wrapped attempt
+    }
+    
+    // Third attempt: wrap cleaned content to allow standalone object/array with commas previously at top-level
+    try {
+        const wrapped = JSON.parse(`{"__wrap__":${cleaned}}`);
+        return wrapped.__wrap__;
+    } catch (e) {
+        // Give up
+    }
+    
+    throw new Error('Unable to parse input as JSON/JSONC');
+}
+
+function pickLaunchConfiguration(data) {
+    // If full launch.json pasted
+    if (data && Array.isArray(data.configurations)) {
+        const found = data.configurations.find(cfg => cfg && (cfg.program || cfg.python || cfg.envFile));
+        return found || data.configurations[0];
+    }
+    // If array of configurations pasted
+    if (Array.isArray(data)) {
+        const found = data.find(cfg => cfg && (cfg.program || cfg.python || cfg.envFile));
+        return found || data[0];
+    }
+    // Otherwise assume it's a single configuration object
+    return data;
+}
+
 // Import from Launch.json
 function importLaunchJson() {
     const input = document.getElementById('launchJsonInput').value.trim();
@@ -899,8 +1035,9 @@ function importLaunchJson() {
     }
     
     try {
-        // Parse JSON
-        const config = JSON.parse(input);
+        // Parse launch.json (tolerates comments and trailing commas)
+        const parsed = tryParseLaunchJson(input);
+        const config = pickLaunchConfiguration(parsed) || {};
         
         // Extract and convert fields
         // Program path -> script path
@@ -963,7 +1100,7 @@ function importLaunchJson() {
         
     } catch (error) {
         console.error('Failed to parse launch.json:', error);
-        showToast('Invalid JSON format. Please check your configuration.', 'error');
+        showToast('Could not parse. Remove extreme syntax or paste a single configuration.', 'error');
     }
 }
 
