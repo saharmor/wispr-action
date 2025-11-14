@@ -121,3 +121,41 @@ export async function apiCall(endpoint, options = {}) {
     }
 }
 
+// ===== MCP API Helpers =====
+export function fetchMcpServers() {
+    return apiCall('/api/mcp/servers');
+}
+
+export function saveMcpServer(payload) {
+    return apiCall('/api/mcp/servers', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+}
+
+export function deleteMcpServer(serverId) {
+    return apiCall(`/api/mcp/servers/${serverId}`, {
+        method: 'DELETE'
+    });
+}
+
+export function updateMcpSecrets(serverId, secrets) {
+    return apiCall(`/api/mcp/servers/${serverId}/secrets`, {
+        method: 'PUT',
+        body: JSON.stringify(secrets)
+    });
+}
+
+export function testMcpServer(serverId) {
+    return apiCall(`/api/mcp/servers/${serverId}/test`, {
+        method: 'POST'
+    });
+}
+
+export function fetchMcpTools(serverId, refresh = false) {
+    const endpoint = serverId
+        ? `/api/mcp/servers/${serverId}/tools${refresh ? '?refresh=true' : ''}`
+        : `/api/mcp/tools${refresh ? '?refresh=true' : ''}`;
+    return apiCall(endpoint);
+}
+
