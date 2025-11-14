@@ -129,6 +129,26 @@
                     <button id="testExecuteBtn" class="btn btn-secondary" style="display: none;">Execute</button>
                 </div>
             </section>
+
+            <!-- MCP Clients -->
+            <section class="command-list-section" id="mcpSection">
+                <div class="section-header">
+                    <h3>MCP Clients</h3>
+                    <div class="section-actions">
+                        <button class="btn btn-secondary" id="refreshMcpBtn">Refresh</button>
+                        <button class="btn btn-primary" id="addMcpBtn">+ Add MCP Client</button>
+                    </div>
+                </div>
+
+                <div class="empty-state" id="mcpEmptyState">
+                    <div class="empty-icon">🛠️</div>
+                    <h3>No MCP clients configured</h3>
+                    <p>Add a client (e.g., Linear or Stripe) to enable voice automations.</p>
+                    <button class="btn btn-primary" id="emptyAddMcpBtn">Add MCP Client</button>
+                </div>
+
+                <div id="mcpServersList" class="mcp-list"></div>
+            </section>
         </main>
     </div>
 
@@ -185,16 +205,24 @@
                                 <tr class="param-row">
                                     <td><input type="text" class="param-name" placeholder="e.g. email, location, etc." oninput="updateArgsTemplatePlaceholder()"></td>
                                     <td>
-                                        <select class="param-type">
+                                        <select class="param-type" onchange="handleParamTypeChange(this)">
                                             <option value="string">string</option>
                                             <option value="number">number</option>
                                             <option value="email">email</option>
                                             <option value="url">url</option>
                                             <option value="boolean">boolean</option>
+                                            <option value="options">options</option>
                                         </select>
                                     </td>
                                     <td><input type="checkbox" class="param-required"></td>
-                                    <td><input type="text" class="param-description" placeholder="The email address"></td>
+                                    <td>
+                                        <input type="text" class="param-description" placeholder="The email address">
+                                        <div class="param-options-wrapper">
+                                            <label>Options (one per line)</label>
+                                            <textarea class="param-options" placeholder="staging&#10;production"></textarea>
+                                            <small class="help-text">Only used when type is <code>options</code>. Numbers are supported.</small>
+                                        </div>
+                                    </td>
                                     <td><button class="btn-icon" onclick="removeParam(this)">−</button></td>
                                 </tr>
                             </tbody>
@@ -227,6 +255,10 @@
                         <label class="radio-label">
                             <input type="radio" name="actionType" value="http" onchange="toggleActionType()">
                             <span>Call HTTP</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="actionType" value="mcp" onchange="toggleActionType()">
+                            <span>MCP Tool</span>
                         </label>
                     </div>
 
@@ -313,12 +345,121 @@
                             </small>
                         </div>
                     </div>
+
+                    <!-- MCP Action -->
+                    <div id="mcpAction" class="action-config" style="display: none;">
+                        <div class="form-group">
+                            <label for="mcpServerSelect">MCP Client *</label>
+                            <select id="mcpServerSelect">
+                                <option value="">Select a client</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="mcpToolSelect">Tool *</label>
+                            <select id="mcpToolSelect" disabled>
+                                <option value="">Select a client first</option>
+                            </select>
+                            <small class="help-text" id="mcpToolSummary"></small>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-sm" type="button" id="importMcpParamsBtn">Import Tool Parameters</button>
+                        </div>
+                    </div>
                 </section>
             </div>
 
             <div class="editor-footer">
                 <button class="btn btn-secondary" onclick="closeCommandEditor()">Cancel</button>
                 <button class="btn btn-primary" id="saveCommandBtn" onclick="saveCommand()">Save Command</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP Editor Panel -->
+    <div class="editor-overlay" id="mcpEditorOverlay">
+        <div class="editor-panel" id="mcpEditorPanel">
+            <div class="editor-header">
+                <h2 id="mcpEditorTitle">New MCP Client</h2>
+                <button class="close-btn" onclick="window.closeMcpEditor()">&times;</button>
+            </div>
+            <div class="editor-content">
+                <section class="editor-section">
+                    <h3>General</h3>
+                    <div class="form-group">
+                        <label for="mcpName">Name *</label>
+                        <input type="text" id="mcpName" placeholder="e.g., Linear" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="mcpTransport">Transport *</label>
+                        <select id="mcpTransport">
+                            <option value="sse">Server-Sent Events (HTTP)</option>
+                            <option value="stdio">StdIO (Local process)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="mcpEnabled">
+                            <span>Enabled</span>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="editor-section" id="mcpSseSection">
+                    <h3>SSE Configuration</h3>
+                    <div class="form-group">
+                        <label for="mcpSseUrl">Endpoint URL *</label>
+                        <input type="text" id="mcpSseUrl" placeholder="https://example.com/mcp">
+                    </div>
+                    <div class="form-group">
+                        <label>Headers</label>
+                        <div id="mcpHeadersContainer" class="kv-container"></div>
+                        <button class="btn btn-sm" id="addHeaderBtn" type="button">+ Add Header</button>
+                    </div>
+                </section>
+
+                <section class="editor-section" id="mcpStdioSection" style="display: none;">
+                    <h3>StdIO Configuration</h3>
+                    <div class="form-group">
+                        <label for="mcpStdioCommand">Command *</label>
+                        <input type="text" id="mcpStdioCommand" placeholder="uvx linear-mcp-server">
+                    </div>
+                    <div class="form-group">
+                        <label for="mcpStdioArgs">Arguments (one per line)</label>
+                        <textarea id="mcpStdioArgs" rows="3" placeholder="--flag=value"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="mcpStdioCwd">Working Directory</label>
+                        <input type="text" id="mcpStdioCwd" placeholder="~/projects/my-server">
+                    </div>
+                    <div class="form-group">
+                        <label>Environment Variables</label>
+                        <div id="mcpEnvContainer" class="kv-container"></div>
+                        <button class="btn btn-sm" id="addEnvBtn" type="button">+ Add Variable</button>
+                    </div>
+                </section>
+
+                <section class="editor-section">
+                    <h3>Secret Fields</h3>
+                    <p class="help-text">Define the secrets this client needs (e.g., API tokens). Values are stored securely in your macOS Keychain.</p>
+                    <div id="mcpSecretFieldsContainer" class="secret-fields-container"></div>
+                    <button class="btn btn-sm" id="addSecretFieldBtn" type="button">+ Add Secret Field</button>
+                </section>
+
+                <section class="editor-section">
+                    <h3>Secret Values</h3>
+                    <div id="mcpSecretValuesContainer" class="secret-values-container"></div>
+                    <button class="btn btn-secondary" id="saveSecretsBtn" type="button">Save Secret Values</button>
+                </section>
+            </div>
+            <div class="editor-footer">
+                <div class="editor-footer-left">
+                    <button class="btn btn-danger" id="deleteMcpBtn" type="button" style="display: none;">Delete</button>
+                    <button class="btn btn-secondary" id="testMcpBtn" type="button">Test Connection</button>
+                </div>
+                <div class="editor-footer-right">
+                    <button class="btn btn-secondary" onclick="window.closeMcpEditor()">Cancel</button>
+                    <button class="btn btn-primary" id="saveMcpBtn" type="button">Save Client</button>
+                </div>
             </div>
         </div>
     </div>
