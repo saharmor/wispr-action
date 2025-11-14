@@ -829,7 +829,8 @@ h1 {
 }
 
 .params-table input[type="text"],
-.params-table select {
+.params-table select,
+.params-table textarea {
     width: 100%;
     padding: 6px 8px;
     border: 1px solid var(--border-light);
@@ -840,7 +841,8 @@ h1 {
 }
 
 .params-table input[type="text"]:focus,
-.params-table select:focus {
+.params-table select:focus,
+.params-table textarea:focus {
     outline: none;
     border-color: var(--text-primary);
 }
@@ -849,6 +851,37 @@ h1 {
     width: 18px;
     height: 18px;
     cursor: pointer;
+}
+
+.param-options-wrapper {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-light);
+    display: none;
+}
+
+.param-row.options-visible .param-options-wrapper {
+    display: block;
+}
+
+.param-options-wrapper label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+}
+
+.param-options-wrapper textarea {
+    min-height: 60px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.param-options-wrapper small {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-muted);
 }
 
 /* Action Type Selector */
@@ -1096,6 +1129,112 @@ h1 {
 
 .modal-footer .btn {
     min-width: 80px;
+}
+
+/* MCP Clients */
+.section-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.mcp-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mcp-card {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    background: var(--bg-white);
+}
+
+.mcp-card-title {
+    font-weight: 600;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.mcp-card-meta {
+    color: var(--text-medium);
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.mcp-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-success {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.badge-muted {
+    background: #e5e7eb;
+    color: #4b5563;
+}
+
+.kv-container,
+.secret-fields-container,
+.secret-values-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kv-row,
+.secret-field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px;
+}
+
+.secret-field-row {
+    grid-template-columns: 1fr 1fr 1fr auto;
+}
+
+.kv-row button,
+.secret-field-row button {
+    align-self: center;
+}
+
+.secret-value-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.secret-value-row input {
+    width: 100%;
+}
+
+#mcpEditorPanel .editor-footer {
+    justify-content: space-between;
+}
+
+#mcpEditorPanel .editor-footer-left,
+#mcpEditorPanel .editor-footer-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
 /* Modal animations for closing */
