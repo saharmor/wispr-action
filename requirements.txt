@@ -1,0 +1,10 @@
+anthropic>=0.40.0
+flask>=3.0.0
+flask-cors>=4.0.0
+flask-compress>=1.13
+pystray>=0.19.0
+Pillow>=10.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+keyring>=24.3.0
+mcp>=0.4.0

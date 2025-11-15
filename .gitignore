@@ -33,3 +33,4 @@ commands.json
 .DS_Store
 execution_history.db
 execution_history.db
+wispr_act.db
