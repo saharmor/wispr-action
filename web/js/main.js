@@ -3,8 +3,10 @@
  */
 import { loadCommands } from './commands.js';
 import { loadMonitorStatus, toggleMonitor } from './monitor.js';
-import { showCommandEditor, setupEditorFieldListeners } from './editor.js';
+import { showCommandEditor, setupEditorFieldListeners, closeEditor, showEditor } from './editor.js';
 import { testParse, testExecute } from './test.js';
+import { loadMcpServers } from './mcp.js';
+import { loadExecutionHistory, startHistoryPolling } from './history.js';
 
 /**
  * Setup event listeners
@@ -13,6 +15,7 @@ function setupEventListeners() {
     // Header buttons
     document.getElementById('newCommandBtn').addEventListener('click', () => showCommandEditor());
     document.getElementById('toggleMonitorBtn').addEventListener('click', toggleMonitor);
+    document.getElementById('addMcpHeaderBtn').addEventListener('click', () => showEditor('mcp', null));
     
     // Test panel
     document.getElementById('testParseBtn').addEventListener('click', testParse);
@@ -23,7 +26,7 @@ function setupEventListeners() {
     if (editorOverlay) {
         editorOverlay.addEventListener('click', (event) => {
             if (event.target === editorOverlay) {
-                window.closeCommandEditor();
+                closeEditor();
             }
         });
     }
@@ -36,11 +39,10 @@ function setupEventListeners() {
  * Initialize the application
  */
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Wispr Action initializing...');
-    
     // Load initial data
     loadCommands();
     loadMonitorStatus();
+    loadMcpServers();
     
     // Setup UI
     setupEventListeners();
@@ -48,6 +50,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh monitor status every 5 seconds
     setInterval(loadMonitorStatus, 5000);
     
-    console.log('✅ Wispr Action initialized');
+    // Load history on startup and start polling (since it's now always visible)
+    loadExecutionHistory(0);
+    startHistoryPolling();
 });
 

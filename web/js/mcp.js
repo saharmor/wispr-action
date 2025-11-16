@@ -30,7 +30,15 @@ export function renderMcpServers() {
     }
 
     emptyState.style.display = 'none';
-    listEl.innerHTML = state.mcpServers
+    
+    // Sort servers by name length (shorter names first)
+    const sortedServers = [...state.mcpServers].sort((a, b) => {
+        const nameA = a.name || a.id || '';
+        const nameB = b.name || b.id || '';
+        return nameA.length - nameB.length;
+    });
+    
+    listEl.innerHTML = sortedServers
         .map(server => {
             const secretsSet = server.secretsSet || {};
             const secretsCount = Object.values(secretsSet).filter(Boolean).length;
@@ -100,7 +108,6 @@ function addMcpServer() {
 function attachEventHandlers() {
     document.getElementById('refreshMcpBtn')?.addEventListener('click', loadMcpServers);
     document.getElementById('addMcpBtn')?.addEventListener('click', addMcpServer);
-    document.getElementById('emptyAddMcpBtn')?.addEventListener('click', addMcpServer);
 }
 
 // Initialize

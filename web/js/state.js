@@ -7,7 +7,7 @@ export const state = {
     isEditing: false,
     monitorStatus: null,
     lastParseResult: null,
-    currentView: 'commands', // 'commands' or 'history'
+    currentView: 'mcp', // 'mcp' or 'commands'
     executionHistory: [],
     historyOffset: 0,
     historyPage: 0,
@@ -16,7 +16,26 @@ export const state = {
     historyHasMore: false,
     historyPollInterval: null, // Store interval ID for cleanup
     mcpServers: [],
-    currentMcpServer: null
+    currentMcpServer: null,
+    mcpEditorTab: 'catalog',
+    mcpCatalogEntries: [],
+    mcpCatalogTotal: 0,
+    mcpCatalogLoading: false,
+    mcpCatalogError: null,
+    mcpCatalogQuery: '',
+    mcpCatalogSelectedId: null,
+    mcpCatalogEntry: null,
+    mcpCatalogIsRefreshing: false,
+    mcpCatalogRefreshProgress: {},
+    mcpCatalogForm: {
+        name: '',
+        enabled: true,
+        transport: '',
+        endpoint: '',
+    },
+    mcpCatalogSecrets: {},
+    mcpCatalogHeaders: [],
+    mcpCatalogQueryParams: [],
 };
 
 // API Base URL
