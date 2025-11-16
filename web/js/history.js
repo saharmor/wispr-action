@@ -12,20 +12,33 @@ import {
     renderDuration 
 } from './components.js';
 
+const HISTORY_PAGE_SIZE = 5;
+
 /**
  * Load execution history from the server
  */
-export async function loadExecutionHistory(limit = 20) {
+export async function loadExecutionHistory(page = 0) {
+    const targetPage = Math.max(page, 0);
+    const limit = HISTORY_PAGE_SIZE;
+    const offset = targetPage * limit;
+    
     try {
-        const data = await apiCall(`/api/logs?limit=${limit}`);
-        state.executionHistory = data.logs || [];
-        state.historyOffset = state.executionHistory.length;
+        const data = await apiCall(`/api/logs?limit=${limit}&offset=${offset}`);
+        const logs = data.logs || [];
+        const total = data.total || 0;
         
-        // Show/hide load more button based on whether there's more data
-        const loadMoreBtn = document.getElementById('loadMoreHistoryBtn');
-        if (loadMoreBtn) {
-            loadMoreBtn.style.display = data.has_more ? 'block' : 'none';
+        // If the requested page is now out of range (e.g., logs were deleted), load the last page
+        if (targetPage > 0 && logs.length === 0 && total > 0) {
+            const lastPage = Math.max(Math.ceil(total / limit) - 1, 0);
+            return loadExecutionHistory(lastPage);
         }
+        
+        state.executionHistory = logs;
+        state.historyOffset = offset;
+        state.historyPage = targetPage;
+        state.historyLimit = limit;
+        state.historyTotal = total;
+        state.historyHasMore = Boolean(data.has_more);
         
         renderHistoryView();
     } catch (error) {
@@ -47,7 +60,7 @@ export function startHistoryPolling() {
     // Poll every 3 seconds to catch new executions from voice/other sources
     state.historyPollInterval = setInterval(() => {
         if (state.currentView === 'history') {
-            loadExecutionHistory();
+            loadExecutionHistory(state.historyPage || 0);
         } else {
             // Stop polling if we switched away from history view
             stopHistoryPolling();
@@ -66,73 +79,29 @@ export function stopHistoryPolling() {
 }
 
 /**
- * Load more history entries (pagination)
- */
-export async function loadMoreHistory() {
-    try {
-        const data = await apiCall(`/api/logs?limit=20&offset=${state.historyOffset}`);
-        const newLogs = data.logs || [];
-        
-        if (newLogs.length === 0) {
-            showToast('No more history to load', 'info', 2000);
-            return;
-        }
-        
-        state.executionHistory = state.executionHistory.concat(newLogs);
-        state.historyOffset = state.executionHistory.length;
-        
-        // Hide load more button if no more logs
-        if (!data.has_more) {
-            document.getElementById('loadMoreHistoryBtn').style.display = 'none';
-        }
-        
-        renderHistoryView();
-        showToast(`Loaded ${newLogs.length} more entries`, 'info', 2000);
-    } catch (error) {
-        // Only show toast if it's not a connection error (modal already shown)
-        if (!error.isConnectionError) {
-            console.error('Failed to load more history:', error);
-            showToast('Failed to load more history', 'error');
-        }
-    }
-}
-
-/**
- * Switch between commands and history views
+ * Switch between commands and mcp views
  */
 export function switchView(viewName) {
     state.currentView = viewName;
     
-    const commandSection = document.getElementById('commandListSection');
-    const historySection = document.getElementById('historySection');
+    const commandsView = document.getElementById('commandsView');
+    const mcpView = document.getElementById('mcpView');
     const commandsTab = document.getElementById('commandsTab');
-    const historyTab = document.getElementById('historyTab');
-    
-    // Also update the duplicate tabs in history section
-    const commandsTab2 = document.getElementById('commandsTab2');
-    const historyTab2 = document.getElementById('historyTab2');
+    const mcpTab = document.getElementById('mcpTab');
+    const commandCount = document.getElementById('commandCount');
     
     if (viewName === 'commands') {
-        commandSection.style.display = 'block';
-        historySection.style.display = 'none';
+        commandsView.style.display = 'block';
+        mcpView.style.display = 'none';
         commandsTab.classList.add('active');
-        historyTab.classList.remove('active');
-        if (commandsTab2) commandsTab2.classList.add('active');
-        if (historyTab2) historyTab2.classList.remove('active');
-        
-        // Stop polling when leaving history view
-        stopHistoryPolling();
-    } else {
-        commandSection.style.display = 'none';
-        historySection.style.display = 'block';
+        mcpTab.classList.remove('active');
+        commandCount.style.display = 'block';
+    } else if (viewName === 'mcp') {
+        commandsView.style.display = 'none';
+        mcpView.style.display = 'block';
         commandsTab.classList.remove('active');
-        historyTab.classList.add('active');
-        if (commandsTab2) commandsTab2.classList.remove('active');
-        if (historyTab2) historyTab2.classList.add('active');
-        
-        // Load history and start continuous polling
-        loadExecutionHistory();
-        startHistoryPolling();
+        mcpTab.classList.add('active');
+        commandCount.style.display = 'none';
     }
 }
 
@@ -145,8 +114,9 @@ export function renderHistoryView() {
     const tableContainer = document.getElementById('historyTableContainer');
     
     if (state.executionHistory.length === 0) {
-        emptyState.style.display = 'block';
+        emptyState.style.display = 'flex';
         tableContainer.style.display = 'none';
+        updateHistoryPaginationControls();
         return;
     }
     
@@ -187,9 +157,74 @@ export function renderHistoryView() {
             </tr>
         `;
     }).join('');
+    
+    updateHistoryPaginationControls();
+}
+
+/**
+ * Update pagination controls for the history table
+ */
+function updateHistoryPaginationControls() {
+    const paginationContainer = document.getElementById('historyPagination');
+    const prevButton = document.getElementById('historyPrevBtn');
+    const nextButton = document.getElementById('historyNextBtn');
+    const pageInfo = document.getElementById('historyPageInfo');
+    
+    if (!paginationContainer || !prevButton || !nextButton || !pageInfo) {
+        return;
+    }
+    
+    const totalEntries = state.historyTotal || 0;
+    const limit = state.historyLimit || HISTORY_PAGE_SIZE;
+    const currentPage = state.historyPage || 0;
+    const totalPages = totalEntries > 0 ? Math.ceil(totalEntries / limit) : 0;
+    const hasHistory = totalEntries > 0;
+    
+    if (!hasHistory) {
+        paginationContainer.style.display = 'none';
+        prevButton.disabled = true;
+        nextButton.disabled = true;
+        pageInfo.textContent = '';
+        return;
+    }
+    
+    paginationContainer.style.display = 'flex';
+    
+    const start = currentPage * limit + 1;
+    const end = Math.min(currentPage * limit + state.executionHistory.length, totalEntries);
+    
+    pageInfo.textContent = `Showing ${start}-${end} of ${totalEntries}`;
+    
+    prevButton.disabled = currentPage === 0;
+    nextButton.disabled = (currentPage + 1) >= totalPages;
+}
+
+/**
+ * Navigate between history pages
+ */
+export function changeHistoryPage(delta) {
+    if (!Number.isInteger(delta) || delta === 0) {
+        return;
+    }
+    
+    const currentPage = state.historyPage || 0;
+    const newPage = currentPage + delta;
+    const totalEntries = state.historyTotal || 0;
+    const limit = state.historyLimit || HISTORY_PAGE_SIZE;
+    const totalPages = totalEntries > 0 ? Math.ceil(totalEntries / limit) : 0;
+    
+    if (newPage < 0) {
+        return;
+    }
+    
+    if (totalPages > 0 && newPage >= totalPages) {
+        return;
+    }
+    
+    loadExecutionHistory(newPage);
 }
 
 // Expose to window for onclick handlers
 window.switchView = switchView;
-window.loadMoreHistory = loadMoreHistory;
+window.changeHistoryPage = changeHistoryPage;
 

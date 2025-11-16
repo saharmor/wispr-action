@@ -171,6 +171,17 @@ h1 {
     line-height: 1.4;
 }
 
+.btn:disabled,
+.btn[disabled] {
+    opacity: 0.6;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn-loading {
+    justify-content: center;
+}
+
 .btn:active {
     transform: translateY(1px);
 }
@@ -1434,6 +1445,7 @@ h1 {
     color: var(--text-light);
     line-height: 1.5;
     display: -webkit-box;
+    line-clamp: 2;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
@@ -2293,5 +2305,21 @@ h1 {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+.spinner-inline {
+    width: 14px;
+    height: 14px;
+    border-width: 2px;
+}
+
+.btn .spinner-inline {
+    border-color: rgba(255, 255, 255, 0.35);
+    border-top-color: currentColor;
+}
+
+.btn.btn-secondary .spinner-inline {
+    border-color: var(--border-medium);
+    border-top-color: var(--text-primary);
 }
 

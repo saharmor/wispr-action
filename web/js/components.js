@@ -106,6 +106,33 @@ export function formatDuration(duration, showUnits = true) {
         return showUnits ? '0.00s' : '0.00';
     }
     
+    // If duration is more than 60 minutes (3600 seconds), show hours, minutes, and seconds
+    if (durationVal >= 3600) {
+        const hours = Math.floor(durationVal / 3600);
+        const minutes = Math.floor((durationVal % 3600) / 60);
+        const seconds = Math.floor(durationVal % 60);
+        
+        const parts = [];
+        if (hours > 0) parts.push(`${hours}h`);
+        if (minutes > 0) parts.push(`${minutes}m`);
+        if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+        
+        return parts.join(' ');
+    }
+    
+    // If duration is more than 60 seconds, show minutes and seconds
+    if (durationVal >= 60) {
+        const minutes = Math.floor(durationVal / 60);
+        const seconds = Math.floor(durationVal % 60);
+        
+        const parts = [];
+        if (minutes > 0) parts.push(`${minutes}m`);
+        if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+        
+        return parts.join(' ');
+    }
+    
+    // For durations less than 60 seconds, show with decimal places
     const formatted = durationVal.toFixed(2);
     return showUnits ? `${formatted}s` : formatted;
 }

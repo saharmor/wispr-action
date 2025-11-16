@@ -2,14 +2,11 @@
 
 import sqlite3
 import json
-import os
 from datetime import datetime
 from typing import List, Dict, Optional
 from contextlib import contextmanager
 
-
-# Database path
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "execution_history.db")
+from config import DB_PATH
 
 
 @contextmanager

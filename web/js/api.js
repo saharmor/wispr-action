@@ -159,3 +159,38 @@ export function fetchMcpTools(serverId, refresh = false) {
     return apiCall(endpoint);
 }
 
+export function searchMcpCatalog({
+    search = '',
+    tag,
+    limit = 25,
+    offset = 0,
+    refresh = false
+} = {}) {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (tag) params.set('tag', tag);
+    if (limit) params.set('limit', limit);
+    if (offset) params.set('offset', offset);
+    if (refresh) params.set('refresh', 'true');
+    const query = params.toString();
+    return apiCall(`/api/mcp/catalog${query ? `?${query}` : ''}`);
+}
+
+export function fetchMcpCatalogEntry(entryId, { refresh = false } = {}) {
+    if (!entryId) {
+        throw new Error('Catalog entry ID is required');
+    }
+    const suffix = refresh ? '?refresh=true' : '';
+    return apiCall(`/api/mcp/catalog/${entryId}${suffix}`);
+}
+
+export function configureMcpFromCatalog(entryId, payload) {
+    if (!entryId) {
+        throw new Error('Catalog entry ID is required');
+    }
+    return apiCall(`/api/mcp/catalog/${entryId}/configure`, {
+        method: 'POST',
+        body: JSON.stringify(payload || {})
+    });
+}
+

@@ -10,12 +10,14 @@ from datetime import datetime
 from command_manager import get_command_manager
 from config import CONFIRM_MODE
 from dotenv import dotenv_values
+from mcp_client import MCPConfigError, MCPExecutionError, get_mcp_manager
 from typing import Optional as TypingOptional, Dict as TypingDict
 
 # ===== Constants =====
 TERMINAL_LAUNCH_TIMEOUT = 10  # Seconds to wait for terminal launch
 RESPONSE_TEXT_LIMIT = 500     # Character limit for HTTP response text
 MONITOR_DELAY = 0.5            # Seconds between terminal monitor checks
+TERMINAL_CLOSE_DELAY = 5       # Grace period before closing the terminal window
 
 
 class ExecutionResult:
@@ -276,9 +278,12 @@ def generate_monitor_applescript(window_id: str) -> str:
             set targetWindow to window id {window_id}
             set isWindowBusy to busy of selected tab of targetWindow
             if not isWindowBusy then
-                delay {MONITOR_DELAY}
-                close targetWindow
-                exit repeat
+                delay {TERMINAL_CLOSE_DELAY}
+                set stillBusy to busy of selected tab of targetWindow
+                if not stillBusy then
+                    close targetWindow
+                    exit repeat
+                end if
             end if
         on error
             exit repeat
@@ -418,20 +423,10 @@ def interpolate_parameters(template: str, parameters: Dict[str, Any], command: O
     result = template
     
     # Build mapping from original names to sanitized parameter values
-    param_map = {}
-    if command and 'parameters' in command:
-        from command_manager import CommandManager
-        manager = CommandManager()
-        for param_def in command['parameters']:
-            original_name = param_def['name']
-            sanitized_name = manager._sanitize_param_name(original_name)
-            # Check if we have the value under the sanitized name
-            if sanitized_name in parameters:
-                param_map[original_name] = parameters[sanitized_name]
-            # Also keep the sanitized name mapping
-            param_map[sanitized_name] = parameters.get(sanitized_name)
+    if command:
+        manager = get_command_manager()
+        param_map = manager.build_parameter_map(command, parameters)
     else:
-        # No command provided, use parameters as-is
         param_map = parameters
     
     # Process conditional sections first: [...] where content may contain {param} placeholders
@@ -758,6 +753,9 @@ def execute(
         # Use provided timeout or default to 0 (no timeout) for HTTP
         http_timeout = timeout if timeout is not None else 0
         return execute_http(command, parameters, confirm_mode, http_timeout)
+    elif action_type == 'mcp':
+        mcp_timeout = timeout if timeout is not None else 0
+        return execute_mcp(command, parameters, confirm_mode, mcp_timeout)
     else:
         return ExecutionResult(
             success=False,
@@ -765,6 +763,78 @@ def execute(
             command_name=command['name'],
             error=f"Unknown action type: {action_type}"
         )
+
+
+def execute_mcp(
+    command: Dict,
+    parameters: Dict[str, Any],
+    confirm_mode: bool = False,
+    timeout: int = 0
+) -> ExecutionResult:
+    """Execute an MCP tool call."""
+    start_time = datetime.now()
+    action = command['action']
+    server_id = action['server_id']
+    tool_name = action['tool']
+
+    manager = get_command_manager()
+    param_map = manager.build_parameter_map(command, parameters)
+
+    args = dict(action.get('default_args', {}))
+    defined_names = {param.get('name') for param in command.get('parameters', []) if param.get('name')}
+    for name in defined_names:
+        value = param_map.get(name)
+        if value not in (None, ""):
+            args[name] = value
+
+    # Include any remaining parameters that are not explicitly defined (failsafe)
+    for key, value in param_map.items():
+        if key in args or value in (None, ""):
+            continue
+        if not defined_names or key in defined_names:
+            args[key] = value
+
+    if confirm_mode and not request_confirmation():
+        return create_result(
+            command, False, start_time,
+            error="Execution cancelled by user"
+        )
+
+    try:
+        mcp_result = get_mcp_manager().call_tool(
+            server_id=server_id,
+            tool_name=tool_name,
+            arguments=args or None,
+            timeout_seconds=timeout if timeout else None
+        )
+    except (MCPConfigError, MCPExecutionError) as exc:
+        return create_result(command, False, start_time, error=str(exc))
+    except Exception as exc:
+        return create_result(command, False, start_time, error=f"MCP execution error: {exc}")
+
+    if mcp_result.get("isError"):
+        return create_result(
+            command,
+            False,
+            start_time,
+            error="MCP tool returned an error",
+            output=json.dumps(mcp_result, indent=2)
+        )
+
+    output_sections = []
+    if mcp_result.get("structuredContent"):
+        output_sections.append(json.dumps(mcp_result["structuredContent"], indent=2))
+    if mcp_result.get("content"):
+        output_sections.append(json.dumps(mcp_result["content"], indent=2))
+
+    output_text = "\n".join(output_sections).strip() or "MCP tool executed successfully."
+
+    return create_result(
+        command,
+        True,
+        start_time,
+        output=output_text
+    )
 
 
 def log_execution(result: ExecutionResult, log_file: Optional[str] = None) -> None:

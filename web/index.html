@@ -34,78 +34,73 @@
                     <span id="statusText">Checking...</span>
                 </div>
                 <button id="toggleMonitorBtn" class="btn btn-primary">Start Monitor</button>
+                <button id="addMcpHeaderBtn" class="btn btn-primary">+ Add MCP Client</button>
                 <button id="newCommandBtn" class="btn btn-success">+ New Command</button>
             </div>
         </header>
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Command List -->
-            <section class="command-list-section" id="commandListSection">
+            <!-- Commands & MCP Clients Section -->
+            <section class="command-list-section" id="mainSection">
                 <div class="section-header">
                     <div class="view-tabs">
-                        <button class="view-tab active" id="commandsTab" onclick="switchView('commands')">Commands</button>
-                        <button class="view-tab" id="historyTab" onclick="switchView('history')">History</button>
+                        <button class="view-tab active" id="mcpTab" onclick="switchView('mcp')">MCP Clients</button>
+                        <button class="view-tab" id="commandsTab" onclick="switchView('commands')">Commands</button>
                     </div>
-                    <span class="command-count" id="commandCount">0 commands</span>
+                    <span class="command-count" id="commandCount" style="display: none;">0 commands</span>
                 </div>
                 
-                <div class="empty-state" id="emptyState">
-                    <div class="empty-icon"></div>
-                    <h3>No commands yet</h3>
-                    <p>Create your first voice command to get started</p>
-                    <button class="btn btn-primary" onclick="showCommandEditor()">Create Command</button>
-                </div>
-
-                <div class="command-table-container" id="commandTableContainer" style="display: none;">
-                    <table class="command-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Description</th>
-                                <th>Examples</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="commandTableBody">
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <!-- History Section -->
-            <section class="command-list-section" id="historySection" style="display: none;">
-                <div class="section-header">
-                    <div class="view-tabs">
-                        <button class="view-tab" id="commandsTab2" onclick="switchView('commands')">Commands</button>
-                        <button class="view-tab active" id="historyTab2" onclick="switchView('history')">History</button>
+                <!-- MCP Clients View -->
+                <div id="mcpView">
+                    <div class="section-actions-inline">
+                        <button class="btn btn-secondary" id="refreshMcpBtn">Refresh</button>
+                        <button class="btn btn-primary" id="addMcpBtn">+ Add MCP Client</button>
                     </div>
+                    
+                    <div class="empty-state" id="mcpEmptyState">
+                        <div class="empty-state-icon">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                            </svg>
+                        </div>
+                        <div class="empty-state-content">
+                            <h3>No MCP clients configured</h3>
+                            <p>Add a client to enable voice automations</p>
+                        </div>
+                    </div>
+
+                    <div id="mcpServersList" class="mcp-list"></div>
                 </div>
 
-                <div class="empty-state" id="historyEmptyState">
-                    <div class="empty-icon">📋</div>
-                    <h3>No command history yet</h3>
-                    <p>Execute a command to see it here</p>
-                </div>
+                <!-- Commands View -->
+                <div id="commandsView" style="display: none;">
+                    <div class="empty-state" id="emptyState">
+                        <div class="empty-state-icon">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                            </svg>
+                        </div>
+                        <div class="empty-state-content">
+                            <h3>No commands yet</h3>
+                            <p>Create your first voice command to get started</p>
+                        </div>
+                    </div>
 
-                <div class="history-table-container" id="historyTableContainer" style="display: none;">
-                    <table class="history-table">
-                        <thead>
-                            <tr>
-                                <th>Timestamp</th>
-                                <th>Command</th>
-                                <th>Parameters</th>
-                                <th>Status</th>
-                                <th>Output</th>
-                                <th>Duration</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historyTableBody">
-                        </tbody>
-                    </table>
-                    <div class="load-more-container">
-                        <button id="loadMoreHistoryBtn" class="btn btn-secondary" onclick="loadMoreHistory()" style="display: none;">Load More</button>
+                    <div class="command-table-container" id="commandTableContainer" style="display: none;">
+                        <table class="command-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Examples</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="commandTableBody">
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>
@@ -130,37 +125,60 @@
                 </div>
             </section>
 
-            <!-- MCP Clients -->
-            <section class="command-list-section" id="mcpSection">
+            <!-- History Section (Full Width Below) -->
+            <section class="command-list-section" id="historySection">
                 <div class="section-header">
-                    <h3>MCP Clients</h3>
-                    <div class="section-actions">
-                        <button class="btn btn-secondary" id="refreshMcpBtn">Refresh</button>
-                        <button class="btn btn-primary" id="addMcpBtn">+ Add MCP Client</button>
+                    <h3>History</h3>
+                </div>
+
+                <div class="empty-state" id="historyEmptyState">
+                    <div class="empty-state-icon">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div class="empty-state-content">
+                        <h3>No command history yet</h3>
+                        <p>Execute a command to see it here</p>
                     </div>
                 </div>
 
-                <div class="empty-state" id="mcpEmptyState">
-                    <div class="empty-icon">🛠️</div>
-                    <h3>No MCP clients configured</h3>
-                    <p>Add a client (e.g., Linear or Stripe) to enable voice automations.</p>
-                    <button class="btn btn-primary" id="emptyAddMcpBtn">Add MCP Client</button>
+                <div class="history-table-container" id="historyTableContainer" style="display: none;">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Command</th>
+                                <th>Parameters</th>
+                                <th>Status</th>
+                                <th>Output</th>
+                                <th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                        </tbody>
+                    </table>
+                    <div class="history-pagination" id="historyPagination" style="display: none;">
+                        <button id="historyPrevBtn" class="btn btn-secondary" onclick="changeHistoryPage(-1)">Previous</button>
+                        <span class="history-page-info" id="historyPageInfo"></span>
+                        <button id="historyNextBtn" class="btn btn-secondary" onclick="changeHistoryPage(1)">Next</button>
+                    </div>
                 </div>
-
-                <div id="mcpServersList" class="mcp-list"></div>
             </section>
         </main>
     </div>
 
-    <!-- Command Editor Panel (Slide-in) -->
+    <!-- Unified Editor Panel (Slide-in) -->
     <div class="editor-overlay" id="editorOverlay">
         <div class="editor-panel" id="editorPanel">
             <div class="editor-header">
                 <h2 id="editorTitle">New Command</h2>
-                <button class="close-btn" onclick="closeCommandEditor()">&times;</button>
+                <button class="close-btn" onclick="closeEditor()">&times;</button>
             </div>
 
             <div class="editor-content">
+                <!-- Command Sections -->
+                <div id="commandSections">
                 <!-- Section 1: Basics -->
                 <section class="editor-section">
                     <h3>General</h3>
@@ -366,99 +384,199 @@
                         </div>
                     </div>
                 </section>
-            </div>
-
-            <div class="editor-footer">
-                <button class="btn btn-secondary" onclick="closeCommandEditor()">Cancel</button>
-                <button class="btn btn-primary" id="saveCommandBtn" onclick="saveCommand()">Save Command</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- MCP Editor Panel -->
-    <div class="editor-overlay" id="mcpEditorOverlay">
-        <div class="editor-panel" id="mcpEditorPanel">
-            <div class="editor-header">
-                <h2 id="mcpEditorTitle">New MCP Client</h2>
-                <button class="close-btn" onclick="window.closeMcpEditor()">&times;</button>
-            </div>
-            <div class="editor-content">
-                <section class="editor-section">
-                    <h3>General</h3>
-                    <div class="form-group">
-                        <label for="mcpName">Name *</label>
-                        <input type="text" id="mcpName" placeholder="e.g., Linear" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="mcpTransport">Transport *</label>
-                        <select id="mcpTransport">
-                            <option value="sse">Server-Sent Events (HTTP)</option>
-                            <option value="stdio">StdIO (Local process)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="mcpEnabled">
-                            <span>Enabled</span>
-                        </label>
-                    </div>
-                </section>
-
-                <section class="editor-section" id="mcpSseSection">
-                    <h3>SSE Configuration</h3>
-                    <div class="form-group">
-                        <label for="mcpSseUrl">Endpoint URL *</label>
-                        <input type="text" id="mcpSseUrl" placeholder="https://example.com/mcp">
-                    </div>
-                    <div class="form-group">
-                        <label>Headers</label>
-                        <div id="mcpHeadersContainer" class="kv-container"></div>
-                        <button class="btn btn-sm" id="addHeaderBtn" type="button">+ Add Header</button>
-                    </div>
-                </section>
-
-                <section class="editor-section" id="mcpStdioSection" style="display: none;">
-                    <h3>StdIO Configuration</h3>
-                    <div class="form-group">
-                        <label for="mcpStdioCommand">Command *</label>
-                        <input type="text" id="mcpStdioCommand" placeholder="uvx linear-mcp-server">
-                    </div>
-                    <div class="form-group">
-                        <label for="mcpStdioArgs">Arguments (one per line)</label>
-                        <textarea id="mcpStdioArgs" rows="3" placeholder="--flag=value"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="mcpStdioCwd">Working Directory</label>
-                        <input type="text" id="mcpStdioCwd" placeholder="~/projects/my-server">
-                    </div>
-                    <div class="form-group">
-                        <label>Environment Variables</label>
-                        <div id="mcpEnvContainer" class="kv-container"></div>
-                        <button class="btn btn-sm" id="addEnvBtn" type="button">+ Add Variable</button>
-                    </div>
-                </section>
-
-                <section class="editor-section">
-                    <h3>Secret Fields</h3>
-                    <p class="help-text">Define the secrets this client needs (e.g., API tokens). Values are stored securely in your macOS Keychain.</p>
-                    <div id="mcpSecretFieldsContainer" class="secret-fields-container"></div>
-                    <button class="btn btn-sm" id="addSecretFieldBtn" type="button">+ Add Secret Field</button>
-                </section>
-
-                <section class="editor-section">
-                    <h3>Secret Values</h3>
-                    <div id="mcpSecretValuesContainer" class="secret-values-container"></div>
-                    <button class="btn btn-secondary" id="saveSecretsBtn" type="button">Save Secret Values</button>
-                </section>
-            </div>
-            <div class="editor-footer">
-                <div class="editor-footer-left">
-                    <button class="btn btn-danger" id="deleteMcpBtn" type="button" style="display: none;">Delete</button>
-                    <button class="btn btn-secondary" id="testMcpBtn" type="button">Test Connection</button>
                 </div>
-                <div class="editor-footer-right">
-                    <button class="btn btn-secondary" onclick="window.closeMcpEditor()">Cancel</button>
-                    <button class="btn btn-primary" id="saveMcpBtn" type="button">Save Client</button>
+                <!-- End Command Sections -->
+
+                <!-- MCP Sections -->
+                <div id="mcpSections" style="display: none;">
+                    <div class="mcp-editor-tabs">
+                        <button class="mcp-editor-tab active" id="mcpCatalogTabBtn" type="button">Catalog</button>
+                        <button class="mcp-editor-tab" id="mcpCustomTabBtn" type="button">Custom server</button>
+                    </div>
+
+                    <!-- Catalog Tab -->
+                    <div id="mcpCatalogWrapper" class="mcp-tab-content">
+                        <section class="editor-section catalog-search-section">
+                            <div class="catalog-search-bar">
+                                <input type="search" id="catalogSearchInput" placeholder="Search the MCP registry (e.g., Stripe, Linear, Jira)">
+                                <button class="btn btn-sm btn-secondary" id="catalogRefreshBtn" type="button">Refresh</button>
+                            </div>
+                            <p class="help-text">Pick from the official Model Context Protocol registry. Secrets are stored in your macOS Keychain.</p>
+                            <div id="catalogStatusMessage" class="catalog-status-message"></div>
+                        </section>
+
+                        <div class="catalog-grid">
+                            <div class="catalog-results" id="catalogResults"></div>
+                            <div class="catalog-detail">
+                                <div id="catalogDetailEmpty" class="catalog-detail-empty">
+                                    <p>Select a server to view details and configure it.</p>
+                                </div>
+                                <div id="catalogDetailContent" style="display: none;">
+                                    <div class="catalog-detail-header">
+                                        <div>
+                                            <h3 id="catalogDetailName"></h3>
+                                            <p id="catalogDetailPublisher" class="catalog-detail-meta"></p>
+                                        </div>
+                                        <span class="badge" id="catalogDetailBadge"></span>
+                                    </div>
+                                    <p id="catalogDetailDescription" class="catalog-detail-description"></p>
+                                    <div id="catalogDetailTags" class="catalog-tag-list"></div>
+                                    <div class="catalog-divider"></div>
+                                    <div class="catalog-config-form">
+                                        <div class="form-group">
+                                            <label for="catalogNameInput">Display Name *</label>
+                                            <input type="text" id="catalogNameInput" placeholder="Stripe">
+                                        </div>
+                                        <div class="form-group catalog-inline-group">
+                                            <div>
+                                                <label for="catalogTransportSelect">Transport</label>
+                                                <select id="catalogTransportSelect"></select>
+                                            </div>
+                                            <label class="checkbox-label catalog-enabled-toggle">
+                                                <input type="checkbox" id="catalogEnabledToggle" checked>
+                                                <span>Enabled</span>
+                                            </label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="catalogEndpointInput">Endpoint URL</label>
+                                            <input type="text" id="catalogEndpointInput" placeholder="https://mcp.example.com">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Secrets</label>
+                                            <div id="catalogSecretsContainer" class="catalog-secrets-container"></div>
+                                        </div>
+                                        <div class="catalog-advanced">
+                                            <button class="catalog-advanced-toggle" id="catalogAdvancedToggle" type="button">
+                                                Advanced options <span class="toggle-icon">▼</span>
+                                            </button>
+                                            <div class="catalog-advanced-content" id="catalogAdvancedContent">
+                                                <div class="form-group">
+                                                    <label>Additional Headers</label>
+                                                    <div id="catalogHeadersContainer" class="kv-container"></div>
+                                                    <button class="btn btn-sm" id="catalogAddHeaderBtn" type="button">+ Add Header</button>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Query Parameters</label>
+                                                    <div id="catalogParamsContainer" class="kv-container"></div>
+                                                    <button class="btn btn-sm" id="catalogAddParamBtn" type="button">+ Add Parameter</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="catalog-actions">
+                                            <button class="btn btn-secondary" id="catalogTestBtn" type="button">Save &amp; Test</button>
+                                            <button class="btn btn-primary" id="catalogConfigureBtn" type="button">Save MCP Client</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom Tab -->
+                    <div id="mcpCustomWrapper" class="mcp-tab-content" style="display: none;">
+                        <section class="editor-section">
+                            <h3>General</h3>
+                            <div class="form-group">
+                                <label for="mcpName">Name *</label>
+                                <input type="text" id="mcpName" placeholder="e.g., Linear" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="mcpTransport">Transport *</label>
+                                <select id="mcpTransport">
+                                    <option value="sse">Server-Sent Events (Legacy HTTP SSE)</option>
+                                    <option value="http">HTTP (Remote MCP)</option>
+                                    <option value="stdio">StdIO (Local process)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="mcpEnabled">
+                                    <span>Enabled</span>
+                                </label>
+                            </div>
+                        </section>
+
+                        <section class="editor-section" id="mcpSseSection">
+                            <h3>SSE Configuration</h3>
+                            <div class="form-group">
+                                <label for="mcpSseUrl">Endpoint URL *</label>
+                                <input type="text" id="mcpSseUrl" placeholder="https://example.com/mcp">
+                            </div>
+                            <div class="form-group">
+                                <label>Headers</label>
+                                <div id="mcpHeadersContainer" class="kv-container"></div>
+                                <button class="btn btn-sm" id="addHeaderBtn" type="button">+ Add Header</button>
+                            </div>
+                        </section>
+
+                        <section class="editor-section" id="mcpHttpSection" style="display: none;">
+                            <h3>HTTP Configuration</h3>
+                            <div class="form-group">
+                                <label for="mcpHttpUrl">Endpoint URL *</label>
+                                <input type="text" id="mcpHttpUrl" placeholder="https://mcp.stripe.com">
+                            </div>
+                            <div class="form-group">
+                                <label>Headers</label>
+                                <div id="mcpHttpHeadersContainer" class="kv-container"></div>
+                                <button class="btn btn-sm" id="addHttpHeaderBtn" type="button">+ Add Header</button>
+                                <small class="help-text">Use Bearer tokens or other secrets via templating (e.g., Authorization: Bearer {{stripe_api_key}}).</small>
+                            </div>
+                        </section>
+
+                        <section class="editor-section" id="mcpStdioSection" style="display: none;">
+                            <h3>StdIO Configuration</h3>
+                            <div class="form-group">
+                                <label for="mcpStdioCommand">Command *</label>
+                                <input type="text" id="mcpStdioCommand" placeholder="uvx linear-mcp-server">
+                            </div>
+                            <div class="form-group">
+                                <label for="mcpStdioArgs">Arguments (one per line)</label>
+                                <textarea id="mcpStdioArgs" rows="3" placeholder="--flag=value"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="mcpStdioCwd">Working Directory</label>
+                                <input type="text" id="mcpStdioCwd" placeholder="~/projects/my-server">
+                            </div>
+                            <div class="form-group">
+                                <label>Environment Variables</label>
+                                <div id="mcpEnvContainer" class="kv-container"></div>
+                                <button class="btn btn-sm" id="addEnvBtn" type="button">+ Add Variable</button>
+                            </div>
+                        </section>
+
+                        <section class="editor-section">
+                            <h3>Secret Fields</h3>
+                            <p class="help-text">Define the secrets this client needs (e.g., API tokens). Values are stored securely in your macOS Keychain.</p>
+                            <div id="mcpSecretFieldsContainer" class="secret-fields-container"></div>
+                            <button class="btn btn-sm" id="addSecretFieldBtn" type="button">+ Add Secret Field</button>
+                        </section>
+
+                        <section class="editor-section">
+                            <h3>Secret Values</h3>
+                            <div id="mcpSecretValuesContainer" class="secret-values-container"></div>
+                            <button class="btn btn-secondary" id="saveSecretsBtn" type="button">Save Secret Values</button>
+                        </section>
+                    </div>
+                </div>
+                <!-- End MCP Sections -->
+            </div>
+
+            <div class="editor-footer">
+                <!-- Command Footer -->
+                <div id="commandFooter">
+                    <button class="btn btn-secondary" onclick="closeEditor()">Cancel</button>
+                    <button class="btn btn-primary" id="saveCommandBtn" onclick="saveCommand()">Save Command</button>
+                </div>
+                <!-- MCP Footer -->
+                <div id="mcpFooter" style="display: none;">
+                    <div class="editor-footer-left">
+                        <button class="btn btn-danger" id="deleteMcpBtn" type="button" style="display: none;">Delete</button>
+                        <button class="btn btn-secondary" id="testMcpBtn" type="button">Test Connection</button>
+                    </div>
+                    <div class="editor-footer-right">
+                        <button class="btn btn-secondary" onclick="closeEditor()">Cancel</button>
+                        <button class="btn btn-primary" id="saveMcpBtn" type="button">Save Client</button>
+                    </div>
                 </div>
             </div>
         </div>
