@@ -28,9 +28,9 @@ logs/
 
 # User data
 commands.json
+mcp_servers.json
 
 # macOS
 .DS_Store
-execution_history.db
 execution_history.db
 wispr_act.db

@@ -71,11 +71,18 @@ function scheduleConnectionErrorCheck() {
  */
 export async function apiCall(endpoint, options = {}) {
     try {
+        const {
+            cache,
+            headers,
+            ...rest
+        } = options;
+
         const response = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
+            cache: cache ?? 'no-store',
+            ...rest,
             headers: {
                 'Content-Type': 'application/json',
-                ...options.headers
+                ...headers
             }
         });
         
@@ -191,6 +198,51 @@ export function configureMcpFromCatalog(entryId, payload) {
     return apiCall(`/api/mcp/catalog/${entryId}/configure`, {
         method: 'POST',
         body: JSON.stringify(payload || {})
+    });
+}
+
+// ===== Composio OAuth Integration API =====
+
+export function getComposioSettings() {
+    return apiCall('/api/composio/settings');
+}
+
+export function setComposioApiKey(apiKey) {
+    return apiCall('/api/composio/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ apiKey })
+    });
+}
+
+export function deleteComposioApiKey() {
+    return apiCall('/api/composio/settings', {
+        method: 'DELETE'
+    });
+}
+
+export function listComposioApps() {
+    return apiCall('/api/composio/apps');
+}
+
+export function initiateOAuth(appName, entityId = 'default', extra = {}) {
+    return apiCall('/api/composio/auth/initiate', {
+        method: 'POST',
+        body: JSON.stringify({
+            appName,
+            entityId,
+            authConfig: extra.authConfig,
+            connectionName: extra.connectionName,
+        })
+    });
+}
+
+export function checkOAuthStatus(connectionId) {
+    return apiCall(`/api/composio/auth/status/${connectionId}`);
+}
+
+export function revokeOAuth(connectionId) {
+    return apiCall(`/api/composio/auth/${connectionId}`, {
+        method: 'DELETE'
     });
 }
 
