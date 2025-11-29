@@ -33,6 +33,7 @@
                     <span class="status-indicator" id="statusIndicator"></span>
                     <span id="statusText">Checking...</span>
                 </div>
+                <button id="settingsBtn" class="btn btn-secondary" title="Settings">⚙️ Settings</button>
                 <button id="toggleMonitorBtn" class="btn btn-primary">Start Monitor</button>
                 <button id="addMcpHeaderBtn" class="btn btn-primary">+ Add MCP Client</button>
                 <button id="newCommandBtn" class="btn btn-success">+ New Command</button>
@@ -201,6 +202,13 @@
                             <span>Run in foreground?</span>
                         </label>
                         <small class="help-text">Opens a visible terminal window for script execution (useful for debugging)</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="cmdReadAloud">
+                            <span>Read results out loud</span>
+                        </label>
+                        <small class="help-text">Uses AI to extract a concise answer and speaks it using text-to-speech</small>
                     </div>
                 </section>
 
@@ -390,8 +398,89 @@
                 <!-- MCP Sections -->
                 <div id="mcpSections" style="display: none;">
                     <div class="mcp-editor-tabs">
-                        <button class="mcp-editor-tab active" id="mcpCatalogTabBtn" type="button">Catalog</button>
+                        <button class="mcp-editor-tab active" id="mcpComposioTabBtn" type="button">Composio</button>
+                        <button class="mcp-editor-tab" id="mcpCatalogTabBtn" type="button">Catalog</button>
                         <button class="mcp-editor-tab" id="mcpCustomTabBtn" type="button">Custom server</button>
+                    </div>
+
+                    <!-- Composio Tab -->
+                    <div id="mcpComposioWrapper" class="mcp-tab-content">
+                        <section class="editor-section composio-search-section">
+                            <div class="composio-header">
+                                <h3>Connect via Composio OAuth</h3>
+                                <p class="help-text">Select an app to authenticate with OAuth. Composio handles the authentication flow securely.</p>
+                            </div>
+
+                            <!-- Composio API Key Status Banner -->
+                            <div id="composioKeyBanner" style="display: none; margin-bottom: 20px; padding: 12px 16px; background: var(--warning-bg, #fff3cd); border: 1px solid var(--warning-border, #ffc107); border-radius: 4px; color: var(--warning-text, #856404);">
+                                <strong>⚠️ Composio API Key Required</strong><br>
+                                To use OAuth authentication, configure your Composio API key first.
+                                <br><br>
+                                <button class="btn btn-primary btn-sm" onclick="window.openComposioSettings()">
+                                    Configure Composio
+                                </button>
+                            </div>
+
+                            <div class="catalog-search-bar">
+                                <input type="search" id="composioSearchInput" placeholder="Search apps (e.g., GitHub, Gmail, Slack)">
+                            </div>
+                            
+                            <div id="composioStatusMessage" class="catalog-status-message">Loading apps...</div>
+                            
+                            <div class="catalog-layout">
+                                <!-- Apps Grid -->
+                                <div class="catalog-list-column">
+                                    <div id="composioAppsList" class="catalog-results"></div>
+                                </div>
+                                
+                                <!-- App Detail Panel -->
+                                <div class="catalog-detail-column">
+                                    <div id="composioDetailEmpty" class="catalog-detail-empty">
+                                        <p>Select an app from the list to connect</p>
+                                    </div>
+                                    
+                                    <div id="composioDetailContent" class="catalog-detail-content" style="display: none;">
+                                        <div class="catalog-detail-header" style="display: flex; align-items: center; gap: 12px;">
+                                            <img id="composioDetailLogo" alt="" style="width: 40px; height: 40px; border-radius: 8px; object-fit: cover; display: none;">
+                                            <div>
+                                                <h3 id="composioDetailName" style="margin-bottom: 4px;"></h3>
+                                                <p id="composioDetailVendor" class="catalog-detail-meta" style="margin: 0; color: var(--text-light); font-size: 13px;"></p>
+                                            </div>
+                                        </div>
+                                        
+                                        <p id="composioDetailDescription" class="catalog-detail-description"></p>
+                                        
+                                        <div class="catalog-divider"></div>
+                                        
+                                        <!-- OAuth Connection Section -->
+                                        <div class="oauth-connection-section">
+                                            <h4>🔐 OAuth Authentication</h4>
+                                            
+                                            <div id="composioAuthStatus">
+                                                <!-- Will be populated dynamically -->
+                                            </div>
+                                            
+                                            <div class="form-group" style="margin-top: 20px;">
+                                                <label for="composioDisplayName">Display Name *</label>
+                                                <input type="text" id="composioDisplayName" placeholder="e.g., My GitHub Account">
+                                                <small class="help-text">This name will appear in your MCP clients list</small>
+                                            </div>
+                                            
+                                            <div class="form-group">
+                                                <label class="checkbox-label">
+                                                    <input type="checkbox" id="composioEnabledToggle" checked>
+                                                    <span>Enabled</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="catalog-actions" style="margin-top: 24px;">
+                                            <button class="btn btn-primary" id="composioSaveBtn" type="button">Save</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
 
                     <!-- Catalog Tab -->
@@ -438,6 +527,13 @@
                                             </label>
                                         </div>
                                         <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="catalogReadAloudToggle">
+                                                <span>Read results out loud</span>
+                                            </label>
+                                            <small class="help-text">Uses AI to extract a concise answer and speaks it using text-to-speech</small>
+                                        </div>
+                                        <div class="form-group">
                                             <label for="catalogEndpointInput">Endpoint URL</label>
                                             <input type="text" id="catalogEndpointInput" placeholder="https://mcp.example.com">
                                         </div>
@@ -472,6 +568,8 @@
                         </div>
                     </div>
 
+                    
+
                     <!-- Custom Tab -->
                     <div id="mcpCustomWrapper" class="mcp-tab-content" style="display: none;">
                         <section class="editor-section">
@@ -493,6 +591,13 @@
                                     <input type="checkbox" id="mcpEnabled">
                                     <span>Enabled</span>
                                 </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="mcpReadAloud">
+                                    <span>Read results out loud</span>
+                                </label>
+                                <small class="help-text">Uses AI to extract a concise answer and speaks it using text-to-speech</small>
                             </div>
                         </section>
 
@@ -623,6 +728,49 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeLaunchJsonImporter()">Cancel</button>
                 <button class="btn btn-primary" onclick="importLaunchJson()">Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Composio Settings Modal -->
+    <div class="modal-overlay" id="composioSettingsModal">
+        <div class="modal-container" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3 class="modal-title">Composio Settings</h3>
+                <button class="modal-close" onclick="closeComposioSettings()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <p style="color: var(--text-medium); margin-bottom: 12px;">
+                        Composio simplifies OAuth authentication for MCP servers. Enter your Composio API key to enable OAuth-based integrations.
+                    </p>
+                    <p style="color: var(--text-medium); margin-bottom: 16px; font-size: 14px;">
+                        Don't have an API key? 
+                        <a href="https://app.composio.dev/settings" target="_blank" rel="noopener" style="color: var(--primary);">Get one from Composio →</a>
+                    </p>
+                </div>
+
+                <div id="composioStatusBanner" style="display: none; padding: 12px; border-radius: var(--radius-sm); margin-bottom: 16px;">
+                    <span id="composioStatusText"></span>
+                </div>
+
+                <div class="field-group">
+                    <label for="composioApiKeyInput">Composio API Key</label>
+                    <input 
+                        type="password" 
+                        id="composioApiKeyInput" 
+                        placeholder="Enter your Composio API key"
+                        style="width: 100%;"
+                    />
+                    <small style="color: var(--text-medium); margin-top: 4px; display: block;">
+                        Your API key is stored securely in your system keychain
+                    </small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeComposioSettings()">Cancel</button>
+                <button class="btn btn-danger" id="deleteComposioKeyBtn" onclick="deleteComposioKey()" style="display: none;">Delete Key</button>
+                <button class="btn btn-primary" id="saveComposioKeyBtn" onclick="saveComposioKey()">Save</button>
             </div>
         </div>
     </div>

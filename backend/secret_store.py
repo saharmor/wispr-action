@@ -6,6 +6,7 @@ import keyring
 from keyring.errors import KeyringError, PasswordDeleteError
 
 from config import KEYRING_SERVICE
+from constants import COMPOSIO_API_KEY_USERNAME
 
 
 def _username(server_id: str, key_name: str) -> str:
@@ -64,4 +65,62 @@ def list_secret_flags(server_id: str, keys: List[str]) -> Dict[str, bool]:
         except RuntimeError:
             flags[key] = False
     return flags
+
+
+# ============================================================================
+# Composio API Key Management (Global, not tied to specific server)
+# ============================================================================
+
+def set_composio_api_key(api_key: str) -> None:
+    """
+    Store Composio API key in the keychain.
+    
+    Args:
+        api_key: Composio API key to store
+    """
+    if not api_key:
+        raise ValueError("Composio API key cannot be empty")
+    
+    try:
+        keyring.set_password(KEYRING_SERVICE, COMPOSIO_API_KEY_USERNAME, api_key)
+    except KeyringError as exc:
+        raise RuntimeError(f"Failed to store Composio API key: {exc}") from exc
+
+
+def get_composio_api_key() -> Optional[str]:
+    """
+    Retrieve Composio API key from the keychain.
+    
+    Returns:
+        Composio API key or None if not set
+    """
+    try:
+        return keyring.get_password(KEYRING_SERVICE, COMPOSIO_API_KEY_USERNAME)
+    except KeyringError as exc:
+        raise RuntimeError(f"Failed to read Composio API key: {exc}") from exc
+
+
+def delete_composio_api_key() -> None:
+    """Delete stored Composio API key."""
+    try:
+        keyring.delete_password(KEYRING_SERVICE, COMPOSIO_API_KEY_USERNAME)
+    except PasswordDeleteError:
+        # Key already absent; nothing to do
+        return
+    except KeyringError as exc:
+        raise RuntimeError(f"Failed to delete Composio API key: {exc}") from exc
+
+
+def is_composio_configured() -> bool:
+    """
+    Check if Composio API key is configured.
+    
+    Returns:
+        True if API key is set
+    """
+    try:
+        api_key = get_composio_api_key()
+        return api_key is not None and len(api_key) > 0
+    except RuntimeError:
+        return False
 
