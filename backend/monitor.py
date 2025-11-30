@@ -10,10 +10,9 @@ import threading
 
 from config import WISPR_DB_PATH, ACTIVATION_WORD, POLL_INTERVAL, WEB_PORT, LOGS_DIR
 from parser import parse_command
-from executor import execute, log_execution, ExecutionResult
+from executor import log_execution, ExecutionResult
 from command_manager import get_command_manager
-from execution_history import start_execution_log, update_execution_log
-from execution_watcher import start_script_completion_watcher
+from command_runner import execute_with_logging
 
 
 class WisprMonitor:
@@ -137,31 +136,14 @@ class WisprMonitor:
         # Execute the command
         print("\nExecuting action...")
         
-        # Get command to check for custom timeout
         manager = get_command_manager()
         command = manager.get_command(parse_result['command_id'])
-        command_name = command['name'] if command else parse_result['command_name']
-        timeout = command.get('timeout') if command else None
-        
-        # Create log entry with "running" status BEFORE execution
-        log_id = start_execution_log(
+        result, _, _ = execute_with_logging(
             parse_result['command_id'],
-            command_name,
-            parse_result['parameters']
+            parse_result['parameters'],
+            command=command,
+            original_transcript=text,  # Pass original transcript for read-aloud feature
         )
-        
-        result = execute(
-            command_id=parse_result['command_id'],
-            parameters=parse_result['parameters'],
-            timeout=timeout
-        )
-        
-        # Update the log entry with the result
-        # Keep scripts marked as 'running' since they are launched asynchronously
-        is_async_script = bool(command and command.get('action', {}).get('type') == 'script')
-        update_execution_log(log_id, result.to_dict(), keep_running=is_async_script)
-        if is_async_script:
-            start_script_completion_watcher(log_id, result.to_dict())
         
         # Display result
         if result.success:

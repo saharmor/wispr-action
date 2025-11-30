@@ -4,7 +4,7 @@
 import { state } from './state.js';
 import { apiCall } from './api.js';
 import { showModal, showConfirm, showToast, escapeHtml } from './ui.js';
-import { switchView } from './history.js';
+import { focusHistorySection, loadExecutionHistory } from './history.js';
 import { renderParameters } from './components.js';
 
 /**
@@ -100,6 +100,12 @@ export async function testExecute() {
             requestBody.timeout = commandTimeout;
         }
         
+        // Pass original transcript for read-aloud feature
+        const testPhrase = document.getElementById('testPhrase')?.value.trim();
+        if (testPhrase) {
+            requestBody.original_transcript = testPhrase;
+        }
+        
         const data = await apiCall('/api/commands/execute', {
             method: 'POST',
             body: JSON.stringify(requestBody)
@@ -112,8 +118,7 @@ export async function testExecute() {
             if (isAsyncScript) {
                 // For async scripts, show a toast and switch to history view
                 showToast('Command launched! Check History tab for status', 'success', 4000);
-                // Automatically switch to history view
-                switchView('history');
+                focusHistorySection();
             } else {
                 // For sync commands (HTTP), show modal with result
                 showModal(
@@ -122,6 +127,7 @@ export async function testExecute() {
                     'success'
                 );
             }
+            loadExecutionHistory(0);
         } else {
             showModal(
                 data.result.error || 'Command execution failed',

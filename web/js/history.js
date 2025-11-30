@@ -54,17 +54,9 @@ export async function loadExecutionHistory(page = 0) {
  * Start polling for history updates
  */
 export function startHistoryPolling() {
-    // Clear any existing interval
     stopHistoryPolling();
-    
-    // Poll every 3 seconds to catch new executions from voice/other sources
     state.historyPollInterval = setInterval(() => {
-        if (state.currentView === 'history') {
-            loadExecutionHistory(state.historyPage || 0);
-        } else {
-            // Stop polling if we switched away from history view
-            stopHistoryPolling();
-        }
+        loadExecutionHistory(state.historyPage || 0);
     }, 3000);
 }
 
@@ -82,6 +74,15 @@ export function stopHistoryPolling() {
  * Switch between commands and mcp views
  */
 export function switchView(viewName) {
+    if (viewName === 'history') {
+        focusHistorySection();
+        return;
+    }
+
+    if (viewName !== 'commands' && viewName !== 'mcp') {
+        viewName = 'mcp';
+    }
+
     state.currentView = viewName;
     
     const commandsView = document.getElementById('commandsView');
@@ -102,6 +103,13 @@ export function switchView(viewName) {
         commandsTab.classList.remove('active');
         mcpTab.classList.add('active');
         commandCount.style.display = 'none';
+    }
+}
+
+export function focusHistorySection() {
+    const section = document.getElementById('historySection');
+    if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 

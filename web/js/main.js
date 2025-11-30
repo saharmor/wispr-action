@@ -3,10 +3,13 @@
  */
 import { loadCommands } from './commands.js';
 import { loadMonitorStatus, toggleMonitor } from './monitor.js';
-import { showCommandEditor, setupEditorFieldListeners, closeEditor, showEditor } from './editor.js';
+import { showCommandEditor, setupEditorFieldListeners, closeEditor, showEditor } from './editor-core.js';
 import { testParse, testExecute } from './test.js';
 import { loadMcpServers } from './mcp.js';
 import { loadExecutionHistory, startHistoryPolling } from './history.js';
+import { getComposioSettings } from './api.js';
+import { state } from './state.js';
+import { openComposioSettings } from './settings.js';
 
 /**
  * Setup event listeners
@@ -16,6 +19,7 @@ function setupEventListeners() {
     document.getElementById('newCommandBtn').addEventListener('click', () => showCommandEditor());
     document.getElementById('toggleMonitorBtn').addEventListener('click', toggleMonitor);
     document.getElementById('addMcpHeaderBtn').addEventListener('click', () => showEditor('mcp', null));
+    document.getElementById('settingsBtn').addEventListener('click', openComposioSettings);
     
     // Test panel
     document.getElementById('testParseBtn').addEventListener('click', testParse);
@@ -36,6 +40,23 @@ function setupEventListeners() {
 }
 
 /**
+ * Load Composio configuration status
+ */
+async function loadComposioStatus() {
+    try {
+        const data = await getComposioSettings();
+        state.composioConfigured = data.configured || false;
+        // Dispatch event for components that need to react
+        window.dispatchEvent(new CustomEvent('composioStatusUpdated', { 
+            detail: { configured: state.composioConfigured }
+        }));
+    } catch (error) {
+        console.error('Failed to load Composio status', error);
+        state.composioConfigured = false;
+    }
+}
+
+/**
  * Initialize the application
  */
 document.addEventListener('DOMContentLoaded', () => {
@@ -43,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCommands();
     loadMonitorStatus();
     loadMcpServers();
+    loadComposioStatus();
     
     // Setup UI
     setupEventListeners();

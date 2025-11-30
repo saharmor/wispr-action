@@ -10,13 +10,24 @@ from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 from flask_compress import Compress
 
+from catalog_configurator import get_catalog_configurator
+from catalog_service import get_catalog_service
 from command_manager import get_command_manager
+from composio_client import ComposioClient, ComposioError
+from constants import HTTPStatus
 from parser import parse_command
 from executor import execute
 from monitor import get_monitor
 from config import WEB_PORT
-from execution_history import add_execution_log, get_execution_logs, get_execution_count, start_execution_log, update_execution_log
-from execution_watcher import start_script_completion_watcher
+from mcp_client import MCPConfigError, get_mcp_manager
+from execution_history import get_execution_logs, get_execution_count
+from command_runner import execute_with_logging
+from secret_store import (
+    delete_composio_api_key,
+    get_composio_api_key,
+    is_composio_configured,
+    set_composio_api_key,
+)
 
 
 app = Flask(__name__, static_folder='../web', static_url_path='')
@@ -30,12 +41,12 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 60 * 60 * 24 * 30  # 30 days
 # Enable gzip compression for responses (including static assets)
 Compress(app)
 
-# ===== Constants =====
-HTTP_OK = 200
-HTTP_CREATED = 201
-HTTP_BAD_REQUEST = 400
-HTTP_NOT_FOUND = 404
-HTTP_INTERNAL_ERROR = 500
+# ===== Constants (using shared HTTPStatus class) =====
+HTTP_OK = HTTPStatus.OK
+HTTP_CREATED = HTTPStatus.CREATED
+HTTP_BAD_REQUEST = HTTPStatus.BAD_REQUEST
+HTTP_NOT_FOUND = HTTPStatus.NOT_FOUND
+HTTP_INTERNAL_ERROR = HTTPStatus.INTERNAL_ERROR
 
 
 # ===== Response Utilities =====
@@ -84,10 +95,22 @@ def handle_errors(f):
     def decorated_function(*args, **kwargs):
         try:
             return f(*args, **kwargs)
+        except MCPConfigError as e:
+            return error_response(str(e), HTTP_BAD_REQUEST)
         except ValueError as e:
             return error_response(str(e), HTTP_BAD_REQUEST)
         except Exception as e:
-            return error_response(str(e), HTTP_INTERNAL_ERROR)
+            app.logger.exception("Unhandled error in route %s", f.__name__)
+            root_error = e
+            if isinstance(e, BaseExceptionGroup) and getattr(e, "exceptions", None):
+                root_error = e.exceptions[0]
+                app.logger.error(
+                    "ExceptionGroup encountered in %s with %d sub-exceptions; returning first: %s",
+                    f.__name__,
+                    len(e.exceptions),
+                    root_error,
+                )
+            return error_response(str(root_error), HTTP_INTERNAL_ERROR)
     return decorated_function
 
 
@@ -190,6 +213,112 @@ def delete_command(command_id):
     return success_response({"message": "Command deleted"})
 
 
+@app.route('/api/mcp/servers', methods=['GET'])
+@handle_errors
+def list_mcp_servers():
+    manager = get_mcp_manager()
+    return success_response({"servers": manager.list_servers()})
+
+
+@app.route('/api/mcp/servers', methods=['POST'])
+@handle_errors
+def upsert_mcp_server():
+    data = request.json or {}
+    manager = get_mcp_manager()
+    server = manager.upsert_server(data)
+    status = HTTP_CREATED if not data.get('id') else HTTP_OK
+    return success_response({"server": server}, status)
+
+
+@app.route('/api/mcp/servers/<server_id>', methods=['DELETE'])
+@handle_errors
+def delete_mcp_server(server_id):
+    manager = get_mcp_manager()
+    removed = manager.delete_server(server_id)
+    if not removed:
+        return error_response("Server not found", HTTP_NOT_FOUND)
+    return success_response({"message": "Server deleted"})
+
+
+@app.route('/api/mcp/servers/<server_id>/secrets', methods=['PUT'])
+@handle_errors
+def update_mcp_secrets(server_id):
+    data = request.json or {}
+    if not isinstance(data, dict):
+        raise ValueError("Secrets payload must be an object")
+    manager = get_mcp_manager()
+    flags = manager.update_secrets(server_id, data)
+    return success_response({"secretsSet": flags})
+
+
+@app.route('/api/mcp/servers/<server_id>/test', methods=['POST'])
+@handle_errors
+def test_mcp_server(server_id):
+    manager = get_mcp_manager()
+    tools = manager.list_tools(server_id, force_refresh=True)
+    return success_response({
+        "toolsCount": len(tools),
+        "message": f"Connected successfully. {len(tools)} tool(s) available."
+    })
+
+
+@app.route('/api/mcp/servers/<server_id>/tools', methods=['GET'])
+@handle_errors
+def list_mcp_server_tools(server_id):
+    manager = get_mcp_manager()
+    force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+    tools = manager.list_tools(server_id, force_refresh=force_refresh)
+    return success_response({"tools": tools})
+
+
+@app.route('/api/mcp/tools', methods=['GET'])
+@handle_errors
+def list_all_mcp_tools():
+    manager = get_mcp_manager()
+    force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+    tools = manager.list_tools(force_refresh=force_refresh)
+    return success_response({"tools": tools})
+
+
+@app.route('/api/mcp/catalog', methods=['GET'])
+@handle_errors
+def list_mcp_catalog():
+    catalog = get_catalog_service()
+    query = request.args.get('search')
+    tag = request.args.get('tag')
+    force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+    limit = request.args.get('limit', 25, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    result = catalog.search_entries(
+        query=query,
+        tag=tag,
+        limit=limit,
+        offset=offset,
+        force_refresh=force_refresh,
+    )
+    return success_response(result)
+
+
+@app.route('/api/mcp/catalog/<path:entry_id>', methods=['GET'])
+@handle_errors
+def get_mcp_catalog_entry(entry_id):
+    catalog = get_catalog_service()
+    force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+    entry = catalog.get_entry(entry_id, force_refresh=force_refresh)
+    if not entry:
+        return error_response("Catalog entry not found", HTTP_NOT_FOUND)
+    return success_response({"entry": entry})
+
+
+@app.route('/api/mcp/catalog/<path:entry_id>/configure', methods=['POST'])
+@handle_errors
+def configure_mcp_from_catalog(entry_id):
+    configurator = get_catalog_configurator()
+    payload = request.json or {}
+    server = configurator.install_from_catalog(entry_id, payload)
+    return success_response({"server": server}, HTTP_CREATED)
+
+
 @app.route('/api/commands/<command_id>/toggle', methods=['PATCH'])
 @handle_errors
 def toggle_command(command_id):
@@ -226,36 +355,22 @@ def execute_command():
     command_id = data.get('command_id')
     parameters = data.get('parameters', {})
     timeout = data.get('timeout')  # Optional timeout in seconds
+    original_transcript = data.get('original_transcript')  # Original user command for read-aloud
     
     if not command_id:
         return error_response("No command_id provided", HTTP_BAD_REQUEST)
     
-    # Get command details before execution
     manager = get_command_manager()
     command = manager.get_command(command_id)
-    command_name = command['name'] if command else 'Unknown Command'
     
-    # Create log entry with "running" status BEFORE execution
-    log_id = start_execution_log(command_id, command_name, parameters)
-    
-    # Execute the command
-    result = execute(command_id, parameters, confirm_mode=False, timeout=timeout)
-    
-    # Check if this is an async command (background or foreground script)
-    # These return immediately after launching, so we keep them as "running"
-    is_async_script = False
-    if command and command.get('action', {}).get('type') == 'script':
-        # Background scripts or foreground scripts are async
-        is_async_script = True  # All scripts are async (background or foreground)
-    
-    # Update the log entry
-    # For async scripts, keep status as "running" since we don't know when they finish
-    # For sync commands (HTTP), mark as completed/failed
-    update_execution_log(log_id, result.to_dict(), keep_running=is_async_script)
-    
-    # If async script, start a watcher to finalize on completion and set accurate duration
-    if is_async_script:
-        start_script_completion_watcher(log_id, result.to_dict())
+    result, log_id, _ = execute_with_logging(
+        command_id,
+        parameters,
+        command=command,
+        timeout=timeout,
+        confirm_mode=False,
+        original_transcript=original_transcript,
+    )
     
     return success_response({"result": result.to_dict(), "log_id": log_id})
 
@@ -422,6 +537,130 @@ def validate_paths():
         "all_valid": all_valid,
         "results": validation_results
     })
+
+
+# ===== Composio OAuth Integration Endpoints =====
+
+@app.route('/api/composio/settings', methods=['GET'])
+@handle_errors
+def get_composio_settings():
+    """Check if Composio API key is configured."""
+    configured = is_composio_configured()
+    return success_response({"configured": configured})
+
+
+@app.route('/api/composio/settings', methods=['PUT'])
+@handle_errors
+def update_composio_settings():
+    """Store or update Composio API key."""
+    data = request.json or {}
+    api_key = data.get('apiKey', '').strip()
+    
+    if not api_key:
+        return error_response("API key is required", HTTP_BAD_REQUEST)
+    
+    # Validate API key by attempting to create a client
+    try:
+        client = ComposioClient(api_key)
+        if not client.validate_api_key():
+            return error_response("Invalid Composio API key", HTTP_BAD_REQUEST)
+    except ComposioError as exc:
+        return error_response(f"Invalid API key: {exc}", HTTP_BAD_REQUEST)
+    
+    # Store API key
+    set_composio_api_key(api_key)
+    
+    return success_response({"message": "Composio API key saved successfully"})
+
+
+@app.route('/api/composio/settings', methods=['DELETE'])
+@handle_errors
+def delete_composio_settings():
+    """Delete stored Composio API key."""
+    delete_composio_api_key()
+    return success_response({"message": "Composio API key deleted"})
+
+
+@app.route('/api/composio/apps', methods=['GET'])
+@handle_errors
+def list_composio_apps():
+    """List available Composio apps/integrations."""
+    api_key = get_composio_api_key()
+    if not api_key:
+        return error_response("Composio API key not configured", HTTP_BAD_REQUEST)
+    
+    try:
+        client = ComposioClient(api_key)
+        apps = client.list_apps()
+        return success_response({"apps": apps})
+    except ComposioError as exc:
+        return error_response(str(exc), HTTP_INTERNAL_ERROR)
+
+
+@app.route('/api/composio/auth/initiate', methods=['POST'])
+@handle_errors
+def initiate_oauth():
+    """Initiate OAuth flow for a Composio app."""
+    data = request.json or {}
+    app_name = data.get('appName')
+    entity_id = data.get('entityId', 'default')
+    auth_config = data.get('authConfig') or {}
+    connection_name = data.get('connectionName')
+    
+    if not app_name:
+        return error_response("App name is required", HTTP_BAD_REQUEST)
+    
+    api_key = get_composio_api_key()
+    if not api_key:
+        return error_response("Composio API key not configured", HTTP_BAD_REQUEST)
+    
+    try:
+        client = ComposioClient(api_key)
+        result = client.initiate_connection(
+            app_name,
+            entity_id=entity_id,
+            auth_config=auth_config,
+            connection_name=connection_name,
+        )
+        return success_response(result)
+    except ComposioError as exc:
+        return error_response(str(exc), HTTP_INTERNAL_ERROR)
+
+
+@app.route('/api/composio/auth/status/<connection_id>', methods=['GET'])
+@handle_errors
+def check_oauth_status(connection_id):
+    """Check OAuth connection status."""
+    api_key = get_composio_api_key()
+    if not api_key:
+        return error_response("Composio API key not configured", HTTP_BAD_REQUEST)
+    
+    try:
+        client = ComposioClient(api_key)
+        connection = client.get_connection(connection_id)
+        return success_response(connection)
+    except ComposioError as exc:
+        return error_response(str(exc), HTTP_INTERNAL_ERROR)
+
+
+@app.route('/api/composio/auth/<connection_id>', methods=['DELETE'])
+@handle_errors
+def revoke_oauth(connection_id):
+    """Revoke OAuth connection."""
+    api_key = get_composio_api_key()
+    if not api_key:
+        return error_response("Composio API key not configured", HTTP_BAD_REQUEST)
+    
+    try:
+        client = ComposioClient(api_key)
+        success = client.delete_connection(connection_id)
+        
+        if not success:
+            return error_response("Failed to revoke connection", HTTP_INTERNAL_ERROR)
+        
+        return success_response({"message": "OAuth connection revoked"})
+    except ComposioError as exc:
+        return error_response(str(exc), HTTP_INTERNAL_ERROR)
 
 
 def run_server(port: int = WEB_PORT, debug: bool = False):

@@ -28,12 +28,45 @@ WEB_PORT = int(os.getenv("WEB_PORT", "9000"))
 # Confirmation mode for testing
 CONFIRM_MODE = os.getenv("CONFIRM_MODE", "false").lower() == "true"
 
+# Read command name aloud before execution (macOS voice)
+READ_COMMAND_ALOUD = os.getenv("READ_COMMAND_ALOUD", "true").lower() == "true"
+
+# Project root helper
+PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+
 # Commands storage file (in project root)
-COMMANDS_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "commands.json"))
+COMMANDS_FILE = os.path.join(PROJECT_ROOT, "commands.json")
+
+# Database file (execution history, MCP catalog cache, etc.)
+DB_PATH = os.path.join(PROJECT_ROOT, "wispr_act.db")
+
+# MCP server config file (no plaintext secrets)
+MCP_SERVERS_FILE = os.path.join(PROJECT_ROOT, "mcp_servers.json")
+
+# Catalog + registry
+MCP_REGISTRY_BASE_URL = os.getenv(
+    "MCP_REGISTRY_BASE_URL", "https://registry.modelcontextprotocol.io"
+)
+MCP_CATALOG_CACHE_FILE = os.path.join(PROJECT_ROOT, "catalog_cache.json")
+MCP_CATALOG_CACHE_TTL = int(os.getenv("MCP_CATALOG_CACHE_TTL", "300"))
+MCP_CATALOG_FETCH_LIMIT = int(os.getenv("MCP_CATALOG_FETCH_LIMIT", "100"))
+MCP_REGISTRY_TIMEOUT = float(os.getenv("MCP_REGISTRY_TIMEOUT", "10.0"))
+
+# Secrets storage (macOS Keychain via keyring)
+KEYRING_SERVICE = os.getenv("KEYRING_SERVICE", "wispr-action")
+
+# Caching for MCP tool discovery (seconds)
+MCP_TOOL_CACHE_TTL = int(os.getenv("MCP_TOOL_CACHE_TTL", "300"))
 
 # Logs directory (in project root)
-LOGS_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "logs"))
+LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Text-to-Speech Configuration
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "apple").lower()  # "apple" or "cartesia"
+CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
+CARTESIA_MODEL_ID = os.getenv("CARTESIA_MODEL_ID", "sonic-3")
+CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
 
 def validate_config():
     """Validate that required configuration is present."""
@@ -55,6 +88,7 @@ def get_config_summary():
         "poll_interval": POLL_INTERVAL,
         "web_port": WEB_PORT,
         "confirm_mode": CONFIRM_MODE,
+        "read_command_aloud": READ_COMMAND_ALOUD,
         "has_api_key": bool(ANTHROPIC_API_KEY),
         "llm_model": LLM_MODEL,
     }

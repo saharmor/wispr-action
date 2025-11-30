@@ -5,10 +5,12 @@ import json
 import os
 import re
 import requests
+import threading
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 from command_manager import get_command_manager
 from config import CONFIRM_MODE
+from constants import ActionType, HTTPMethod
 from dotenv import dotenv_values
 from mcp_client import MCPConfigError, MCPExecutionError, get_mcp_manager
 from typing import Optional as TypingOptional, Dict as TypingDict
@@ -703,7 +705,8 @@ def execute(
     command_id: str,
     parameters: Dict[str, Any],
     confirm_mode: Optional[bool] = None,
-    timeout: Optional[int] = None
+    timeout: Optional[int] = None,
+    original_transcript: Optional[str] = None
 ) -> ExecutionResult:
     """
     Execute a command with the given parameters.
@@ -713,6 +716,7 @@ def execute(
         parameters: Extracted parameters
         confirm_mode: Override global CONFIRM_MODE if provided
         timeout: Execution timeout in seconds (default: 0 = no timeout)
+        original_transcript: Original user command transcript for read-aloud feature
         
     Returns:
         ExecutionResult
@@ -744,18 +748,14 @@ def execute(
     
     # Execute based on action type
     action_type = command['action']['type']
+    effective_timeout = timeout if timeout is not None else 0
     
-    if action_type == 'script':
-        # Use provided timeout or default to 0 (no timeout) for scripts
-        script_timeout = timeout if timeout is not None else 0
-        return execute_script(command, parameters, confirm_mode, script_timeout)
-    elif action_type == 'http':
-        # Use provided timeout or default to 0 (no timeout) for HTTP
-        http_timeout = timeout if timeout is not None else 0
-        return execute_http(command, parameters, confirm_mode, http_timeout)
-    elif action_type == 'mcp':
-        mcp_timeout = timeout if timeout is not None else 0
-        return execute_mcp(command, parameters, confirm_mode, mcp_timeout)
+    if action_type == ActionType.SCRIPT:
+        return execute_script(command, parameters, confirm_mode, effective_timeout)
+    elif action_type == ActionType.HTTP:
+        return execute_http(command, parameters, confirm_mode, effective_timeout)
+    elif action_type == ActionType.MCP:
+        return execute_mcp(command, parameters, confirm_mode, effective_timeout, original_transcript)
     else:
         return ExecutionResult(
             success=False,
@@ -769,7 +769,8 @@ def execute_mcp(
     command: Dict,
     parameters: Dict[str, Any],
     confirm_mode: bool = False,
-    timeout: int = 0
+    timeout: int = 0,
+    original_transcript: Optional[str] = None
 ) -> ExecutionResult:
     """Execute an MCP tool call."""
     start_time = datetime.now()
@@ -813,13 +814,19 @@ def execute_mcp(
         return create_result(command, False, start_time, error=f"MCP execution error: {exc}")
 
     if mcp_result.get("isError"):
-        return create_result(
+        result = create_result(
             command,
             False,
             start_time,
             error="MCP tool returned an error",
             output=json.dumps(mcp_result, indent=2)
         )
+        
+        # Check if we should read results out loud for MCP server
+        if original_transcript:
+            try_speak_mcp_result(command, server_id, original_transcript, result)
+        
+        return result
 
     output_sections = []
     if mcp_result.get("structuredContent"):
@@ -829,12 +836,51 @@ def execute_mcp(
 
     output_text = "\n".join(output_sections).strip() or "MCP tool executed successfully."
 
-    return create_result(
+    result = create_result(
         command,
         True,
         start_time,
         output=output_text
     )
+    
+    # Check if we should read results out loud for MCP server
+    if original_transcript:
+        try_speak_mcp_result(command, server_id, original_transcript, result)
+    
+    return result
+
+
+def try_speak_mcp_result(
+    command: Dict,
+    server_id: str,
+    original_transcript: str,
+    result: ExecutionResult
+) -> None:
+    """Try to speak MCP result if server has read_aloud enabled."""
+    try:
+        # Import here to avoid circular dependency
+        from mcp_client import get_mcp_manager
+        from result_speaker import process_and_speak_result
+        
+        mcp_manager = get_mcp_manager()
+        server = mcp_manager.get_server(server_id)
+        
+        if server and server.get('read_aloud', False):
+            # Run text-to-speech in a background thread so it doesn't block
+            def speak_in_background():
+                try:
+                    process_and_speak_result(
+                        original_command=original_transcript,
+                        execution_result=result.to_dict(),
+                        command_name=command.get('name', 'MCP command')
+                    )
+                except Exception as e:
+                    print(f"Error in MCP read-aloud background thread: {e}")
+            
+            thread = threading.Thread(target=speak_in_background, daemon=True)
+            thread.start()
+    except Exception as e:
+        print(f"Error checking MCP read_aloud setting: {e}")
 
 
 def log_execution(result: ExecutionResult, log_file: Optional[str] = None) -> None:

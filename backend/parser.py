@@ -71,7 +71,8 @@ def parse_command(transcript_text: str) -> Dict[str, Any]:
         # Check if a tool was used
         if response["tool_use"]:
             tool_use = response["tool_use"]
-            command_id = tool_use["name"]
+            tool_name = tool_use.get("name")
+            command_id = manager.resolve_tool_command_id(tool_name) if tool_name else tool_name
             # Ensure parameters is a dictionary
             parameters = tool_use.get("input") or {}
             if not isinstance(parameters, dict):

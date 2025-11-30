@@ -36,6 +36,9 @@ export const state = {
     mcpCatalogSecrets: {},
     mcpCatalogHeaders: [],
     mcpCatalogQueryParams: [],
+    composioConfigured: false, // Whether Composio API key is set
+    composioApps: [], // List of available Composio apps
+    composioSelectedApp: null, // Currently selected Composio app
 };
 
 // API Base URL

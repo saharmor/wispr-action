@@ -1,10 +1,10 @@
 /**
- * MCP client settings management (List rendering only, editor is in editor.js)
+ * MCP client settings management (List rendering only, editor is in editor-core.js)
  */
 import { state } from './state.js';
 import { fetchMcpServers, deleteMcpServer as deleteMcpServerApi, testMcpServer as testMcpServerApi } from './api.js';
 import { showToast, showConfirm, escapeHtml } from './ui.js';
-import { showEditor } from './editor.js';
+import { showEditor } from './editor-core.js';
 
 export async function loadMcpServers() {
     try {
@@ -62,8 +62,8 @@ export function renderMcpServers() {
                     </div>
                     <div class="mcp-card-actions">
                         <button class="btn btn-sm" onclick="window.editMcpServer('${server.id}')">Edit</button>
-                        <button class="btn btn-sm" onclick="window.testMcpServerFromList('${server.id}')">Test</button>
-                        <button class="btn btn-sm btn-danger" onclick="window.deleteMcpServerFromList('${server.id}')">Delete</button>
+                        <button class="btn btn-sm" id="testMcpListBtn-${server.id}" onclick="window.testMcpServerFromList('${server.id}')">Test</button>
+                        <button class="btn btn-sm btn-danger" id="deleteMcpListBtn-${server.id}" onclick="window.deleteMcpServerFromList('${server.id}')">Delete</button>
                     </div>
                 </div>
             `;
@@ -74,12 +74,39 @@ export function renderMcpServers() {
 // Functions for list actions (test, delete from the MCP list view)
 async function testMcpServerFromList(serverId) {
     if (!serverId) return;
+    setListTestLoadingState(serverId, true);
     try {
         const result = await testMcpServerApi(serverId);
         showToast(result.message || 'Connection successful', 'success');
     } catch (error) {
         console.error('MCP test failed', error);
         showToast(error.message || 'Failed to connect', 'error');
+    } finally {
+        setListTestLoadingState(serverId, false);
+    }
+}
+
+function setListTestLoadingState(serverId, isLoading) {
+    const testBtn = document.getElementById(`testMcpListBtn-${serverId}`);
+    const deleteBtn = document.getElementById(`deleteMcpListBtn-${serverId}`);
+    if (!testBtn) return;
+
+    if (isLoading) {
+        if (!testBtn.dataset.defaultLabel) {
+            testBtn.dataset.defaultLabel = testBtn.innerHTML;
+        }
+        testBtn.disabled = true;
+        testBtn.classList.add('btn-loading');
+        testBtn.innerHTML =
+            '<span class="spinner spinner-inline" aria-hidden="true"></span><span>Testing...</span>';
+        testBtn.setAttribute('aria-busy', 'true');
+        deleteBtn?.setAttribute('disabled', 'true');
+    } else {
+        testBtn.disabled = false;
+        testBtn.classList.remove('btn-loading');
+        testBtn.innerHTML = testBtn.dataset.defaultLabel || 'Test';
+        testBtn.removeAttribute('aria-busy');
+        deleteBtn?.removeAttribute('disabled');
     }
 }
 

@@ -72,6 +72,37 @@ This will make your computer say "Welcome to Wispr Action! Go ahead and create y
 
 Commands are managed through the web dashboard interface. Creating new commands is straightforward through the UI, where you can configure command names, descriptions, parameters, and actions (scripts or HTTP requests). All commands are automatically saved to `commands.json`, which Wispr Action uses to route and execute your voice commands.
 
+Parameters support several input types (`string`, `number`, `email`, `url`, `boolean`) plus an `options` enum type. When you choose `options`, provide the allowable values (strings or integers) and the parser will only ever pick from that list—perfect for things like repo names or environment choices.
+
+### MCP Clients (Stripe + Linear)
+
+Wispr Action now understands [Model Context Protocol](https://modelcontextprotocol.io) servers. This lets you connect tools such as Stripe and Linear, securely store their API keys, and expose each MCP tool as a voice command.
+
+1. Open the **MCP Clients** card in the dashboard and click **Add MCP Client**.
+2. Choose a transport:
+   - **HTTP** for remote MCP servers that expose the Streamable HTTP transport (Stripe’s hosted MCP uses `https://mcp.stripe.com`).
+   - **SSE** for legacy MCP servers that still expose `/.well-known/mcp` over Server-Sent Events (e.g., older Linear deployments).
+   - **StdIO** if you run a local MCP server process (`command`, optional args, working directory, env variables).
+3. Define required secrets (e.g., `api_token`). Actual secret values are saved to your macOS Keychain via the `keyring` library—`mcp_servers.json` only tracks metadata.
+4. Click **Save Client**, then **Save Secret Values**, and finally **Test Connection**. A successful test lists the number of tools exposed by the MCP server.
+5. Every enabled MCP tool is immediately available as a “virtual command” (you can speak to them without creating anything else). When you want more control, open the command editor, switch the Action to **MCP Tool**, pick the client/tool, and use **Import Tool Parameters** to populate the parameter table from the tool’s JSON schema.
+
+#### Example Configurations
+
+| Vendor | Transport | Headers / Env | Secret Fields |
+|--------|-----------|---------------|---------------|
+| **Linear** | SSE (`https://mcp.linear.app/sse`) | `Authorization: Bearer {{api_token}}` | `api_token` (Linear personal API key) |
+| **Stripe** | HTTP (`https://mcp.stripe.com`) | `Authorization: Bearer {{stripe_api_key}}` (or OAuth once supported) | `stripe_api_key` |
+
+> Tip: use templating (`{{secret_name}}`) anywhere a secret should be injected—headers for SSE servers or env vars for StdIO servers.
+
+#### Example Voice Prompts
+
+- “Command, create a Linear ticket for Sahar to finish the mobile table view.”
+- “Command, open a Stripe test charge for 25 dollars to Sahar’s card.”
+
+Both prompts will route through the MCP tool definitions you expose. When you need custom defaults (e.g., hard-coded team IDs), create a saved MCP command, set the defaults in the command editor, and they’ll be available in voice prompts.
+
 ### Example Commands
 
 #### Script Command with Optional Parameters

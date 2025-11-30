@@ -22,10 +22,16 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 from mcp.types import CallToolResult
 
+from composio_client import ComposioClient, ComposioError
 from config import MCP_SERVERS_FILE, MCP_TOOL_CACHE_TTL
-from secret_store import delete_secret, get_secret, list_secret_flags, set_secret
-
-TEMPLATE_PATTERN = re.compile(r"\{\{([^}]+)\}\}")
+from constants import TEMPLATE_PATTERN, TransportType
+from secret_store import (
+    delete_secret,
+    get_composio_api_key,
+    get_secret,
+    list_secret_flags,
+    set_secret,
+)
 
 
 class MCPConfigError(Exception):
@@ -114,6 +120,9 @@ class MCPClientManager:
                 return None
             copy_server = copy.deepcopy(server)
             copy_server["secretsSet"] = list_secret_flags(server_id, _secret_keys(server))
+            # Add OAuth connection status if available
+            if copy_server.get("oauth_connection_id"):
+                copy_server["oauthConnected"] = True
             return copy_server
 
     def upsert_server(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -337,15 +346,80 @@ class MCPClientManager:
         new_query = urlencode(existing)
         return urlunparse(parsed._replace(query=new_query))
 
+    def _get_composio_headers(self, server: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """
+        Get Composio authentication headers if server uses OAuth via Composio.
+        
+        Returns:
+            Headers dict with x-api-key, or None if not OAuth/Composio
+        """
+        oauth_connection_id = server.get("oauth_connection_id")
+        if not oauth_connection_id:
+            return None
+        
+        # Get Composio API key
+        composio_api_key = get_composio_api_key()
+        if not composio_api_key:
+            raise MCPConfigError("Composio API key not configured. Please set it in Settings.")
+        
+        return {"x-api-key": composio_api_key}
+
+    def _get_composio_mcp_url(self, server: Dict[str, Any]) -> Optional[str]:
+        """
+        Get the Composio MCP endpoint URL if server uses OAuth via Composio.
+        
+        Returns:
+            Composio MCP endpoint URL, or None if not OAuth/Composio
+        """
+        oauth_connection_id = server.get("oauth_connection_id")
+        if not oauth_connection_id:
+            return None
+        
+        composio_api_key = get_composio_api_key()
+        if not composio_api_key:
+            raise MCPConfigError("Composio API key not configured")
+        
+        try:
+            client = ComposioClient(composio_api_key)
+            connection = client.get_connection(oauth_connection_id)
+            
+            # Status can be "active", "ACTIVE", etc. - compare case-insensitively
+            status = str(connection.get("status", "")).lower()
+            if status != "active":
+                raise MCPConfigError(f"OAuth connection not active: {connection['status']}")
+            
+            return connection["mcpEndpoint"]
+        except ComposioError as exc:
+            raise MCPConfigError(f"Failed to get Composio connection: {exc}") from exc
+
     @asynccontextmanager
     async def _open_session(self, server: Dict[str, Any]):
         transport = server.get("transport")
-        secrets = self._get_secret_values(server["id"], server)
-
+        
         if not server.get("enabled", True):
             raise MCPConfigError(f"Server '{server['name']}' is disabled")
+        
+        # Check if this is an OAuth-based server using Composio
+        oauth_connection_id = server.get("oauth_connection_id")
+        if oauth_connection_id:
+            # Override URL and headers with Composio MCP endpoint
+            composio_url = self._get_composio_mcp_url(server)
+            composio_headers = self._get_composio_headers(server)
+            
+            if not composio_url or not composio_headers:
+                raise MCPConfigError(f"Failed to get Composio MCP endpoint for '{server['name']}'")
+            
+            # Use HTTP transport with Composio endpoint
+            async with streamablehttp_client(url=composio_url, headers=composio_headers) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    yield session
+            return
+        
+        # Standard flow for non-OAuth servers
+        secrets = self._get_secret_values(server["id"], server)
 
-        if transport == "sse":
+        if transport == TransportType.SSE:
             sse_config = server.get("sse") or {}
             url = sse_config.get("url")
             if not url:
@@ -358,7 +432,7 @@ class MCPClientManager:
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     yield session
-        elif transport == "http":
+        elif transport == TransportType.HTTP:
             http_config = server.get("http") or {}
             url = http_config.get("url")
             if not url:
@@ -371,7 +445,7 @@ class MCPClientManager:
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     yield session
-        elif transport == "stdio":
+        elif transport == TransportType.STDIO:
             stdio_config = server.get("stdio") or {}
             command = stdio_config.get("command")
             if not command:

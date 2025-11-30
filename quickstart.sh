@@ -35,7 +35,7 @@ source venv/bin/activate
 echo ""
 echo "📥 Installing dependencies..."
 pip install -q --upgrade pip
-pip install -q -r requirements.txt
+pip install -q -r backend/requirements.txt
 if [ $? -ne 0 ]; then
     echo "❌ Failed to install dependencies"
     exit 1

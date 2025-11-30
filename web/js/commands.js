@@ -4,7 +4,7 @@
 import { state } from './state.js';
 import { apiCall } from './api.js';
 import { showToast, showConfirm, escapeHtml } from './ui.js';
-import { showCommandEditor } from './editor.js';
+import { showCommandEditor } from './editor-core.js';
 
 /**
  * Load commands from the server
