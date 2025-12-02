@@ -322,7 +322,7 @@ def execute_in_foreground(full_command: str, cwd: Optional[str], env_vars: Dict,
             text=True,
             timeout=TERMINAL_LAUNCH_TIMEOUT
         )
-        
+
         if result.returncode == 0:
             # Get the window ID and start monitor
             window_id = result.stdout.strip()
