@@ -10,6 +10,9 @@ Transform your voice dictations into automated actions. Wispr Action monitors yo
 <a href="http://aitidbits.ai/" target="_blank" style="display: inline-flex; align-items: center; text-decoration: none;"><img src="https://github.com/saharmor/saharmor.github.io/blob/main/images/ai%20tidbits%20logo.png?raw=true" alt="Stay updated on AI" width="20" height="20" style="margin-right: 5px;"> Stay updated on AI</a>
 </p>
 
+
+<img width="761" height="924" alt="wispr action opengraph" src="https://github.com/user-attachments/assets/0a7f2cf5-a967-4c14-b55b-87b4b8e7ac66" style="border-radius: 12px;" />
+
 </div>
 
 ## Features
