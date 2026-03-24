@@ -33,8 +33,12 @@ from contextlib import contextmanager
 
 _LOG_START_RE = re.compile(r"updateDictationStatus: listening")
 _LOG_END_RE = re.compile(r"updateDictationStatus: idle")
+_LOG_DISMISSED_RE = re.compile(r"updateDictationStatus: dismissed")
 
 _DB_SETTLE_DELAY = 0.15
+_DB_FLUSH_TIMEOUT = 2.0
+_DB_FLUSH_POLL_INTERVAL = 0.25
+_WISPR_APP_PATH = "/Applications/Wispr Flow.app"
 
 
 class WisprMonitor:
@@ -202,6 +206,13 @@ class WisprMonitor:
         if self._volume_controller:
             self._volume_controller.on_dictation_start()
 
+    def _on_dictation_dismissed(self) -> None:
+        """Called when the user cancels dictation (e.g. presses Esc)."""
+        self._dictation_active = False
+        print("⏹️  Dictation cancelled")
+        if self._volume_controller:
+            self._volume_controller.on_dictation_end()
+
     def _on_dictation_end(self) -> None:
         """Called when dictation finishes — fetch transcript and process."""
         self._dictation_active = False
@@ -210,29 +221,70 @@ class WisprMonitor:
         if self._volume_controller:
             self._volume_controller.on_dictation_end()
 
-        # Brief delay so the Wispr DB INSERT is fully committed (WAL flush)
-        # before we query. The `formatted` log line precedes `idle` by ~24ms;
-        # 150ms gives plenty of margin without feeling sluggish.
+        # Wait for the transcript to appear in the DB, retrying over
+        # _DB_FLUSH_TIMEOUT seconds.  Wispr occasionally fails to flush
+        # the record; when that happens we restart the app to recover.
         time.sleep(_DB_SETTLE_DELAY)
 
-        self._fetch_and_process_latest()
+        transcript = self._wait_for_transcript()
+        if transcript:
+            self._process_transcript(transcript)
+        else:
+            print(f"⚠️  No new transcript found in DB after {_DB_FLUSH_TIMEOUT}s — Wispr may be stuck")
+            self._restart_wispr()
+
+    def _wait_for_transcript(self) -> Optional[Dict]:
+        """Poll the DB for a new transcript, returning it or None on timeout."""
+        deadline = time.monotonic() + _DB_FLUSH_TIMEOUT
+        while time.monotonic() < deadline:
+            try:
+                with self.get_db_connection() as conn:
+                    new = self.get_latest_transcript(conn, self.last_timestamp)
+                if new and new['id'] not in self.processed_ids:
+                    return new
+            except sqlite3.Error as e:
+                print(f"Database error while waiting for transcript: {e}")
+            time.sleep(_DB_FLUSH_POLL_INTERVAL)
+        return None
+
+    # ------------------------------------------------------------------
+    # Wispr Flow restart
+    # ------------------------------------------------------------------
+
+    def _restart_wispr(self) -> None:
+        """Kill Wispr Flow and relaunch it from /Applications."""
+        print("🔄  Restarting Wispr Flow...")
+        try:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "Wispr Flow" to quit'],
+                capture_output=True, timeout=5,
+            )
+            # Give the process time to fully exit
+            time.sleep(2)
+        except Exception as e:
+            print(f"   Graceful quit failed ({e}), force-killing...")
+            subprocess.run(["pkill", "-x", "Wispr Flow"], capture_output=True)
+            time.sleep(1)
+
+        try:
+            subprocess.Popen(
+                ["open", _WISPR_APP_PATH],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("   Wispr Flow relaunched — waiting for it to initialise...")
+            time.sleep(5)
+            print("   Wispr Flow should be ready now")
+        except Exception as e:
+            print(f"   Failed to relaunch Wispr Flow: {e}")
+            print(f"   Please start it manually from {_WISPR_APP_PATH}")
 
     # ------------------------------------------------------------------
     # Command processing
     # ------------------------------------------------------------------
 
-    def _fetch_and_process_latest(self) -> None:
-        """Fetch the latest transcript from the DB and process if new."""
-        try:
-            with self.get_db_connection() as conn:
-                new_transcript = self.get_latest_transcript(conn, self.last_timestamp)
-        except sqlite3.Error as e:
-            print(f"Database error fetching transcript: {e}")
-            return
-
-        if not new_transcript or new_transcript['id'] in self.processed_ids:
-            return
-
+    def _process_transcript(self, new_transcript: Dict) -> None:
+        """Route a transcript to the right handler (command / optimize / skip)."""
         text = self.get_transcript_text(new_transcript)
         asr_text_raw = new_transcript.get('asrText')
         asr_text = asr_text_raw.strip() if asr_text_raw and isinstance(asr_text_raw, str) else ''
@@ -248,9 +300,6 @@ class WisprMonitor:
             )
             process_optimize(transcript_without_activation)
 
-            self.processed_ids.add(new_transcript['id'])
-            self.last_timestamp = new_transcript['timestamp']
-
         elif self.contains_activation_word(asr_text):
             print(f"\nNew command transcript detected!")
             print(f"   ID: {new_transcript['id']}")
@@ -260,13 +309,11 @@ class WisprMonitor:
             self.play_activation_sound()
             self.process_command(text)
 
-            self.processed_ids.add(new_transcript['id'])
-            self.last_timestamp = new_transcript['timestamp']
-
         elif text:
             print(f"New transcript (no activation word): {text[:50]}...")
-            self.processed_ids.add(new_transcript['id'])
-            self.last_timestamp = new_transcript['timestamp']
+
+        self.processed_ids.add(new_transcript['id'])
+        self.last_timestamp = new_transcript['timestamp']
 
     def process_command(self, text: str) -> Optional[ExecutionResult]:
         print(f"\n{'='*60}")
@@ -333,7 +380,6 @@ class WisprMonitor:
         try:
             f.seek(0, 2)
             current_inode = self._get_file_inode(self.log_path)
-            lines_since_rotation_check = 0
 
             while not self._stop_event.is_set():
                 line = f.readline()
@@ -355,6 +401,8 @@ class WisprMonitor:
 
                 if _LOG_START_RE.search(line) and not self._dictation_active:
                     self._on_dictation_start()
+                elif _LOG_DISMISSED_RE.search(line) and self._dictation_active:
+                    self._on_dictation_dismissed()
                 elif _LOG_END_RE.search(line) and self._dictation_active:
                     self._on_dictation_end()
         finally:
@@ -373,34 +421,7 @@ class WisprMonitor:
                     continue
 
                 if new_transcript and new_transcript['id'] not in self.processed_ids:
-                    text = self.get_transcript_text(new_transcript)
-                    asr_text_raw = new_transcript.get('asrText')
-                    asr_text = asr_text_raw.strip() if asr_text_raw and isinstance(asr_text_raw, str) else ''
-
-                    if self.contains_optimize_activation_word(asr_text):
-                        print(f"\nNew optimize request detected!")
-                        print(f"   ID: {new_transcript['id']}")
-                        print(f"   Timestamp: {new_transcript['timestamp']}")
-                        print(f"   App: {new_transcript.get('app', 'N/A')}")
-                        transcript_without_activation = self.remove_activation_word(
-                            text, self.optimize_activation_word
-                        )
-                        process_optimize(transcript_without_activation)
-                        self.processed_ids.add(new_transcript['id'])
-                        self.last_timestamp = new_transcript['timestamp']
-                    elif self.contains_activation_word(asr_text):
-                        print(f"\nNew command transcript detected!")
-                        print(f"   ID: {new_transcript['id']}")
-                        print(f"   Timestamp: {new_transcript['timestamp']}")
-                        print(f"   App: {new_transcript.get('app', 'N/A')}")
-                        self.play_activation_sound()
-                        self.process_command(text)
-                        self.processed_ids.add(new_transcript['id'])
-                        self.last_timestamp = new_transcript['timestamp']
-                    elif text:
-                        print(f"New transcript (no activation word): {text[:50]}...")
-                        self.processed_ids.add(new_transcript['id'])
-                        self.last_timestamp = new_transcript['timestamp']
+                    self._process_transcript(new_transcript)
 
                 self._stop_event.wait(self.poll_interval)
 
