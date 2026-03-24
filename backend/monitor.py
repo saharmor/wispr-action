@@ -1,48 +1,86 @@
-"""Monitor Wispr Flow database for new transcriptions and execute commands."""
+"""Monitor Wispr Flow log file for dictation events and process commands."""
 
 import time
 import sqlite3
 import os
 import json
-from datetime import datetime
-from typing import Optional, Dict, Set
+import re
+import subprocess
+from typing import Optional, Dict
 import threading
 
-from config import WISPR_DB_PATH, ACTIVATION_WORD, POLL_INTERVAL, WEB_PORT, LOGS_DIR
+from config import (
+    WISPR_DB_PATH,
+    WISPR_LOG_PATH,
+    ACTIVATION_WORD,
+    OPTIMIZE_ACTIVATION_WORD,
+    POLL_INTERVAL,
+    WEB_PORT,
+    LOGS_DIR,
+    ACTIVATION_SOUND_ENABLED,
+    ACTIVATION_SOUND_PATH,
+    AUTO_VOLUME_REDUCTION_ENABLED,
+    DICTATION_VOLUME_LEVEL,
+)
 from parser import parse_command
 from executor import log_execution, ExecutionResult
 from command_manager import get_command_manager
 from command_runner import execute_with_logging
+from prompt_optimizer import process_optimize
+from bounded_set import BoundedSet
+from volume_controller import VolumeController
+from contextlib import contextmanager
+
+_LOG_START_RE = re.compile(r"updateDictationStatus: listening")
+_LOG_END_RE = re.compile(r"updateDictationStatus: idle")
+
+_DB_SETTLE_DELAY = 0.15
 
 
 class WisprMonitor:
-    """Monitor Wispr Flow database for new transcriptions."""
-    
-    def __init__(self, db_path: str = WISPR_DB_PATH):
+    """Monitor Wispr Flow via log-file tailing for dictation events."""
+
+    def __init__(self, db_path: str = WISPR_DB_PATH, log_path: str = WISPR_LOG_PATH):
         self.db_path = os.path.expanduser(db_path)
+        self.log_path = os.path.expanduser(log_path)
         self.activation_word = ACTIVATION_WORD.lower()
+        self.optimize_activation_word = OPTIMIZE_ACTIVATION_WORD.lower()
         self.poll_interval = POLL_INTERVAL
         self.is_running = False
         self.monitor_thread: Optional[threading.Thread] = None
         self.last_timestamp: Optional[float] = None
-        self.processed_ids: Set[str] = set()
+        self.processed_ids: BoundedSet[str] = BoundedSet(max_size=1000)
         self._stop_event = threading.Event()
-    
+        self._activation_sound_warned = False
+        self._dictation_active = False
+
+        self._volume_controller: Optional[VolumeController] = None
+        if AUTO_VOLUME_REDUCTION_ENABLED:
+            self._volume_controller = VolumeController(dictation_volume=DICTATION_VOLUME_LEVEL)
+
+    # ------------------------------------------------------------------
+    # Database helpers (still needed to fetch transcript content)
+    # ------------------------------------------------------------------
+
+    @contextmanager
     def get_db_connection(self):
-        """Get a connection to the Wispr Flow database."""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
-            return conn
+            yield conn
         except sqlite3.Error as e:
             print(f"Error connecting to database: {e}")
-            return None
-    
+            raise
+        finally:
+            if conn:
+                conn.close()
+
     def get_latest_transcript(self, conn, last_timestamp: Optional[float] = None) -> Optional[Dict]:
         """Get the latest transcript from the History table."""
         try:
             cursor = conn.cursor()
-            
+
             if last_timestamp:
                 query = """
                     SELECT transcriptEntityId, timestamp, asrText, formattedText, editedText, 
@@ -62,9 +100,9 @@ class WisprMonitor:
                     LIMIT 1
                 """
                 cursor.execute(query)
-            
+
             row = cursor.fetchone()
-            
+
             if row:
                 return {
                     'id': row['transcriptEntityId'],
@@ -77,75 +115,186 @@ class WisprMonitor:
                     'url': row['url'],
                     'personalizationStyleSettings': row['personalizationStyleSettings']
                 }
-            
+
             return None
-            
+
         except sqlite3.Error as e:
             print(f"Error querying database: {e}")
             return None
-    
+
+    # ------------------------------------------------------------------
+    # Text helpers
+    # ------------------------------------------------------------------
+
     def get_transcript_text(self, transcript: Dict) -> str:
-        """Get the text content from a transcript."""
         text = transcript.get('editedText') or transcript.get('formattedText') or ""
         return text.strip()
-    
+
     def contains_activation_word(self, text: str) -> bool:
-        """Check if the text starts with the activation word (first word)."""
         if not text:
             return False
-        
-        # Split into words and normalize
-        words = text.lower().split()
-        if words:
-            # Remove punctuation from first word
-            words[0] = ''.join(c for c in words[0] if c.isalnum())
+        words = text.split()
         if not words:
             return False
-        
-        if len(words) >= 1 and words[0] == self.activation_word:
-            return True
-        
-        return False
-    
+        first_word_normalized = ''.join(c for c in words[0].lower() if c.isalnum())
+        return first_word_normalized == self.activation_word
+
+    def contains_optimize_activation_word(self, text: str) -> bool:
+        if not text:
+            return False
+        words = text.split()
+        if not words:
+            return False
+        first_word_normalized = ''.join(c for c in words[0].lower() if c.isalnum())
+        return first_word_normalized == self.optimize_activation_word
+
+    def remove_activation_word(self, text: str, activation_word: str) -> str:
+        if not text:
+            return text
+        words = text.split()
+        if not words:
+            return text
+        first_word_normalized = ''.join(c for c in words[0].lower() if c.isalnum())
+        if first_word_normalized == activation_word.lower():
+            return ' '.join(words[1:]).strip()
+        return text
+
+    # ------------------------------------------------------------------
+    # Sound
+    # ------------------------------------------------------------------
+
+    def play_activation_sound(self) -> None:
+        if not ACTIVATION_SOUND_ENABLED:
+            return
+
+        sound_path = os.path.expanduser(ACTIVATION_SOUND_PATH)
+        if not os.path.exists(sound_path):
+            if not self._activation_sound_warned:
+                print(f"Warning: Activation sound file not found: {sound_path}")
+                self._activation_sound_warned = True
+            return
+
+        try:
+            subprocess.Popen(
+                ["afplay", sound_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True
+            )
+        except FileNotFoundError:
+            if not self._activation_sound_warned:
+                print("Warning: 'afplay' command not found (macOS only)")
+                self._activation_sound_warned = True
+        except Exception as e:
+            if not self._activation_sound_warned:
+                print(f"Warning: Failed to play activation sound: {e}")
+                self._activation_sound_warned = True
+
+    # ------------------------------------------------------------------
+    # Dictation lifecycle callbacks
+    # ------------------------------------------------------------------
+
+    def _on_dictation_start(self) -> None:
+        """Called when the user begins dictating."""
+        self._dictation_active = True
+        print("\n🎙️  Dictation started")
+        if self._volume_controller:
+            self._volume_controller.on_dictation_start()
+
+    def _on_dictation_end(self) -> None:
+        """Called when dictation finishes — fetch transcript and process."""
+        self._dictation_active = False
+        print("✅  Dictation ended")
+
+        if self._volume_controller:
+            self._volume_controller.on_dictation_end()
+
+        # Brief delay so the Wispr DB INSERT is fully committed (WAL flush)
+        # before we query. The `formatted` log line precedes `idle` by ~24ms;
+        # 150ms gives plenty of margin without feeling sluggish.
+        time.sleep(_DB_SETTLE_DELAY)
+
+        self._fetch_and_process_latest()
+
+    # ------------------------------------------------------------------
+    # Command processing
+    # ------------------------------------------------------------------
+
+    def _fetch_and_process_latest(self) -> None:
+        """Fetch the latest transcript from the DB and process if new."""
+        try:
+            with self.get_db_connection() as conn:
+                new_transcript = self.get_latest_transcript(conn, self.last_timestamp)
+        except sqlite3.Error as e:
+            print(f"Database error fetching transcript: {e}")
+            return
+
+        if not new_transcript or new_transcript['id'] in self.processed_ids:
+            return
+
+        text = self.get_transcript_text(new_transcript)
+        asr_text_raw = new_transcript.get('asrText')
+        asr_text = asr_text_raw.strip() if asr_text_raw and isinstance(asr_text_raw, str) else ''
+
+        if self.contains_optimize_activation_word(asr_text):
+            print(f"\nNew optimize request detected!")
+            print(f"   ID: {new_transcript['id']}")
+            print(f"   Timestamp: {new_transcript['timestamp']}")
+            print(f"   App: {new_transcript.get('app', 'N/A')}")
+
+            transcript_without_activation = self.remove_activation_word(
+                text, self.optimize_activation_word
+            )
+            process_optimize(transcript_without_activation)
+
+            self.processed_ids.add(new_transcript['id'])
+            self.last_timestamp = new_transcript['timestamp']
+
+        elif self.contains_activation_word(asr_text):
+            print(f"\nNew command transcript detected!")
+            print(f"   ID: {new_transcript['id']}")
+            print(f"   Timestamp: {new_transcript['timestamp']}")
+            print(f"   App: {new_transcript.get('app', 'N/A')}")
+
+            self.play_activation_sound()
+            self.process_command(text)
+
+            self.processed_ids.add(new_transcript['id'])
+            self.last_timestamp = new_transcript['timestamp']
+
+        elif text:
+            print(f"New transcript (no activation word): {text[:50]}...")
+            self.processed_ids.add(new_transcript['id'])
+            self.last_timestamp = new_transcript['timestamp']
+
     def process_command(self, text: str) -> Optional[ExecutionResult]:
-        """
-        Process a detected command.
-        
-        Args:
-            text: Command text to process
-            
-        Returns:
-            ExecutionResult or None if parsing failed
-        """
         print(f"\n{'='*60}")
         print(f"Detected command: {text}")
         print(f"{'='*60}\n")
-        
-        # Parse command using Claude
+
         parse_result = parse_command(text)
-        
+
         if not parse_result.get('success'):
             print(f"Unable to parse command: {parse_result.get('error', 'Unknown error')}")
             if parse_result.get('response_text'):
                 print(f"Claude says: {parse_result['response_text']}")
             return None
-        
+
         print(f"Matched command: {parse_result['command_name']}")
         print(f"Parameters: {json.dumps(parse_result['parameters'], indent=2)}")
-        
-        # Execute the command
+
         print("\nExecuting action...")
-        
+
         manager = get_command_manager()
         command = manager.get_command(parse_result['command_id'])
         result, _, _ = execute_with_logging(
             parse_result['command_id'],
             parse_result['parameters'],
             command=command,
-            original_transcript=text,  # Pass original transcript for read-aloud feature
+            original_transcript=text,
         )
-        
-        # Display result
+
         if result.success:
             print(f"Execution successful ({result.duration:.2f}s)")
             if result.output:
@@ -154,87 +303,150 @@ class WisprMonitor:
             print(f"Execution failed: {result.error}")
             if result.output:
                 print(f"Output: {result.output[:200]}")
-        
+
         print(f"\n{'='*60}\n")
-        
-        # Log execution to file as well
+
         log_execution(result, os.path.join(LOGS_DIR, 'executions.log'))
-        
+
         return result
-    
+
+    # ------------------------------------------------------------------
+    # Main monitor loop — tails the Wispr log file
+    # ------------------------------------------------------------------
+
+    def _get_file_inode(self, path: str) -> Optional[int]:
+        try:
+            return os.stat(path).st_ino
+        except OSError:
+            return None
+
     def _monitor_loop(self):
-        """Internal monitoring loop (runs in thread)."""
+        """Tail Wispr Flow's main.log to detect dictation start/end."""
+        try:
+            f = open(self.log_path, "r")
+        except OSError as e:
+            print(f"Error opening log file {self.log_path}: {e}")
+            print("Falling back to database polling...")
+            self._monitor_loop_db_fallback()
+            return
+
+        try:
+            f.seek(0, 2)
+            current_inode = self._get_file_inode(self.log_path)
+            lines_since_rotation_check = 0
+
+            while not self._stop_event.is_set():
+                line = f.readline()
+                if not line:
+                    self._stop_event.wait(0.05)
+
+                    # Check for log rotation every idle cycle
+                    new_inode = self._get_file_inode(self.log_path)
+                    if new_inode is not None and new_inode != current_inode:
+                        print("Log file rotated, reopening...")
+                        f.close()
+                        try:
+                            f = open(self.log_path, "r")
+                        except OSError:
+                            self._stop_event.wait(1)
+                            continue
+                        current_inode = new_inode
+                    continue
+
+                if _LOG_START_RE.search(line) and not self._dictation_active:
+                    self._on_dictation_start()
+                elif _LOG_END_RE.search(line) and self._dictation_active:
+                    self._on_dictation_end()
+        finally:
+            f.close()
+
+    def _monitor_loop_db_fallback(self):
+        """Legacy DB-polling fallback in case the log file is unavailable."""
         while not self._stop_event.is_set():
             try:
-                # Get new connection for each check
-                conn = self.get_db_connection()
-                if not conn:
-                    time.sleep(self.poll_interval)
+                try:
+                    with self.get_db_connection() as conn:
+                        new_transcript = self.get_latest_transcript(conn, self.last_timestamp)
+                except sqlite3.Error as e:
+                    print(f"Database error in monitor loop: {e}")
+                    self._stop_event.wait(self.poll_interval)
                     continue
-                
-                # Check for new transcripts
-                new_transcript = self.get_latest_transcript(conn, self.last_timestamp)
-                conn.close()
-                
+
                 if new_transcript and new_transcript['id'] not in self.processed_ids:
                     text = self.get_transcript_text(new_transcript)
-                    
-                    # Check for activation word
-                    if self.contains_activation_word(new_transcript['asrText']):
+                    asr_text_raw = new_transcript.get('asrText')
+                    asr_text = asr_text_raw.strip() if asr_text_raw and isinstance(asr_text_raw, str) else ''
+
+                    if self.contains_optimize_activation_word(asr_text):
+                        print(f"\nNew optimize request detected!")
+                        print(f"   ID: {new_transcript['id']}")
+                        print(f"   Timestamp: {new_transcript['timestamp']}")
+                        print(f"   App: {new_transcript.get('app', 'N/A')}")
+                        transcript_without_activation = self.remove_activation_word(
+                            text, self.optimize_activation_word
+                        )
+                        process_optimize(transcript_without_activation)
+                        self.processed_ids.add(new_transcript['id'])
+                        self.last_timestamp = new_transcript['timestamp']
+                    elif self.contains_activation_word(asr_text):
                         print(f"\nNew command transcript detected!")
                         print(f"   ID: {new_transcript['id']}")
                         print(f"   Timestamp: {new_transcript['timestamp']}")
                         print(f"   App: {new_transcript.get('app', 'N/A')}")
-                        
-                        # Process the command
+                        self.play_activation_sound()
                         self.process_command(text)
-                        
-                        # Mark as processed
                         self.processed_ids.add(new_transcript['id'])
                         self.last_timestamp = new_transcript['timestamp']
                     elif text:
-                        # New transcript but not a command
                         print(f"New transcript (no activation word): {text[:50]}...")
                         self.processed_ids.add(new_transcript['id'])
                         self.last_timestamp = new_transcript['timestamp']
-                
-                time.sleep(self.poll_interval)
-                
+
+                self._stop_event.wait(self.poll_interval)
+
             except Exception as e:
                 print(f"\nMonitor error: {e}")
                 import traceback
                 traceback.print_exc()
-                time.sleep(self.poll_interval)
-    
+                self._stop_event.wait(self.poll_interval)
+
+    # ------------------------------------------------------------------
+    # Start / stop / status
+    # ------------------------------------------------------------------
+
     def start(self):
         """Start monitoring in a background thread."""
         if self.is_running:
             print("Warning: Monitor is already running")
             return
-        
+
+        use_log_tailing = os.path.exists(self.log_path)
+        mode = "log-file tailing" if use_log_tailing else "database polling (log file not found)"
+
         print(f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║         Wispr Action Monitor - STARTING                      ║
 ╚══════════════════════════════════════════════════════════════╝
 
-Watching Wispr Flow database for new transcripts...
+Watching Wispr Flow for new transcripts via {mode}
+Log file: {self.log_path}
 Database: {self.db_path}
-Activation word: "{self.activation_word}"
-Check interval: {self.poll_interval}s
+Command activation word: "{self.activation_word}"
+Optimize activation word: "{self.optimize_activation_word}"
+Volume reduction: {"ON (→ " + str(DICTATION_VOLUME_LEVEL) + "%)" if self._volume_controller else "OFF"}
 
 How to use:
   1. Say the activation word followed by your command
   2. Example: "Command, run email processor for sahar@gmail.com"
-  3. The system will automatically detect and execute the command
+  3. Or use optimize mode: "Optimize, I want to build a feature that..."
+  4. The system will automatically detect and execute the command or optimize the prompt
 """)
-        
-        # Check if database exists
+
         if not os.path.exists(self.db_path):
             print(f"Error: Database not found at: {self.db_path}")
             print("Please make sure Wispr Flow is installed and has been used at least once.")
             return
-        
-        # Check if there are any enabled commands
+
         manager = get_command_manager()
         enabled = manager.get_enabled_commands()
         if not enabled:
@@ -244,58 +456,57 @@ How to use:
             print(f"Loaded {len(enabled)} enabled command(s):")
             for cmd in enabled:
                 print(f"   - {cmd['name']}")
-        
-        # Get initial state
-        conn = self.get_db_connection()
-        if not conn:
+
+        try:
+            with self.get_db_connection() as conn:
+                latest = self.get_latest_transcript(conn)
+                self.last_timestamp = latest['timestamp'] if latest else None
+
+                if latest:
+                    self.processed_ids.add(latest['id'])
+                    print(f"\nConnected to database")
+                    print(f"Starting from timestamp: {self.last_timestamp}\n")
+                else:
+                    print("\nConnected to database")
+                    print("Waiting for first transcript...\n")
+        except sqlite3.Error as e:
+            print(f"Error connecting to database: {e}")
             return
-        
-        # Get the latest transcript to establish baseline
-        latest = self.get_latest_transcript(conn)
-        self.last_timestamp = latest['timestamp'] if latest else None
-        
-        if latest:
-            self.processed_ids.add(latest['id'])
-            print(f"\nConnected to database")
-            print(f"Starting from timestamp: {self.last_timestamp}\n")
-        else:
-            print(f"\nConnected to database")
-            print(f"Waiting for first transcript...\n")
-        
-        conn.close()
-        
-        # Start monitoring thread
+
         self.is_running = True
         self._stop_event.clear()
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
-        
+
         print("Monitor is now running!\n")
-    
+
     def stop(self):
         """Stop monitoring."""
         if not self.is_running:
             print("Warning: Monitor is not running")
             return
-        
+
         print("\nStopping monitor...")
         self.is_running = False
         self._stop_event.set()
-        
+
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
-        
+
         print("Monitor stopped\n")
-    
+
     def get_status(self) -> Dict:
         """Get current monitor status."""
         return {
             "running": self.is_running,
             "db_path": self.db_path,
+            "log_path": self.log_path,
             "activation_word": self.activation_word,
             "poll_interval": self.poll_interval,
             "last_timestamp": self.last_timestamp,
-            "processed_count": len(self.processed_ids)
+            "processed_count": len(self.processed_ids),
+            "dictation_active": self._dictation_active,
+            "volume_reduction": AUTO_VOLUME_REDUCTION_ENABLED,
         }
 
 
@@ -313,18 +524,16 @@ def get_monitor() -> WisprMonitor:
 if __name__ == '__main__':
     """Run monitor standalone."""
     import sys
-    
+
     monitor = get_monitor()
-    
+
     try:
         monitor.start()
-        
-        # Keep running until interrupted
+
         while True:
             time.sleep(1)
-    
+
     except KeyboardInterrupt:
         print("\n\nReceived interrupt signal...")
         monitor.stop()
         sys.exit(0)
-
